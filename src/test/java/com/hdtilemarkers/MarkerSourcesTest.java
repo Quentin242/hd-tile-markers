@@ -381,9 +381,10 @@ public class MarkerSourcesTest
     {
         when(client.getLocalDestinationLocation()).thenReturn(new LocalPoint(1600, 1600, -1));
         when(settings.destinationTileBorderWidth()).thenReturn(4.0);
+        when(settings.highlightDestinationColor()).thenReturn(java.awt.Color.ORANGE);
         Marker m = collect().get(0);
         assertEquals("destination", m.key);
-        assertEquals(java.awt.Color.GRAY, m.color);
+        assertEquals(java.awt.Color.ORANGE, m.color);
         assertEquals(4f, m.borderWidth, 0);
         when(settings.highlightDestinationTile()).thenReturn(false);
         assertTrue(collect().isEmpty());
