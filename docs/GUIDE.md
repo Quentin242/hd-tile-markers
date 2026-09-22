@@ -11,7 +11,7 @@ Initial release candidate for Plugin Hub review. Live GPU/117 HD compatibility a
 Every marker is rebuilt each frame as flat scene geometry with its border width in screen pixels, so it stays sharp in Stretched Mode with GPU or 117 HD. Vertices are nudged towards the camera along their own view ray, which keeps them above the terrain without moving them on screen. Bridge tiles render on the plane above, like the client does.
 
 - **Ground Markers:** the active profile's saved marks, including imported tilepacks, with Ground Markers' own color, border width and fill. Nothing is copied or migrated. Labels and the minimap stay with Ground Markers.
-- **Tile Indicators:** destination, hovered and true tile, with the same options and defaults, plus Corner Tile Indicators' "Corners only" and corner size.
+- **Tile Indicators:** destination, hovered and true tile, with the same options and the original development preset as defaults, plus Corner Tile Indicators' "Corners only" and corner size.
 - **Tile Packs** (Hub plugin): the packs enabled there, including custom packs, with its override color, border width, fill and labels. The built-in pack list is bundled from Tile Packs (see notices).
 - **Better NPC Highlight** (Hub plugin): its tags and all its settings (per-style lists, colors, presets, task highlight, rave, widths, ignore dead/pets, distance). Tile styles (regular and corner lines), hull, area, clickbox, outline and respawn tiles are drawn in the scene; dashed lines, names and respawn countdowns with its own 2D code. Its overlay is hidden while HD Tile Markers draws; its menus and entity hider keep working.
 - **Stealing Artefacts** (Hub plugin): in Port Piscarilius, the target house's drawers and ladder (clickbox), the patrol guards (hull, green when lured) and Captain Khaled without a task, with its settings and colours. Its three scene overlays are hidden while HD Tile Markers draws; the patrol facing arrows stay 2D; its hint arrow and panel keep working.
@@ -26,6 +26,10 @@ Every marker is rebuilt each frame as flat scene geometry with its border width 
 - A 2D fallback for anything not drawn in the scene (no GPU, errors, other world views, more than 1,500 tiles).
 
 HD Tile Markers only draws marks while the plugin that owns them is enabled, and never changes another plugin's settings.
+
+## Defaults
+
+The defaults use the original development preset: 200-tile draw distance, a green destination with corner borders, cyan true-tile corners, hover highlighting and a game-world-only active path with translucent green/grey fills. Saved settings take precedence; reset HD Tile Markers to defaults to apply this preset to an existing profile. Legacy NPC/object tags are not bundled as defaults.
 
 ## Rendering limits
 

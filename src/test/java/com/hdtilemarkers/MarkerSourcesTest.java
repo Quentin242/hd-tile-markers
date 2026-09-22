@@ -48,6 +48,9 @@ public class MarkerSourcesTest
         when(player.getWorldView()).thenReturn(wv);
         when(player.getLocalLocation()).thenReturn(new LocalPoint(1344, 1344, -1));
         settings = mock(HdTileMarkersConfig.class, CALLS_REAL_METHODS);
+        // Source-selection tests isolate saved marks from the user-facing true-tile default.
+        // Tests for the current tile explicitly enable it and provide a world location.
+        when(settings.highlightCurrentTile()).thenReturn(false);
         sources = new MarkerSources(client, config, GSON, settings, new ObjectMarkerSource(client, config, GSON), new TilePackSource(config, GSON));
     }
 

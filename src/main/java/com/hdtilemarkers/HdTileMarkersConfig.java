@@ -1,5 +1,5 @@
 /*
- * The Tile Indicators options reuse the option names, descriptions and defaults of RuneLite's
+ * The Tile Indicators options reuse the option names and descriptions of RuneLite's
  * TileIndicatorsConfig (copyright (c) 2018 Tomas Slusny, BSD 2-Clause; META-INF/LICENSE-runelite); the path
  * options those of Path Marker's PathMarkerConfig (copyright (c) 2022 GeChallengeM, BSD 2-Clause;
  * META-INF/LICENSE-path-marker). See THIRD_PARTY_NOTICES.md.
@@ -11,8 +11,8 @@ import net.runelite.client.config.*;
 
 /**
  * Options follow the plugins HD Tile Markers adapts (Tile Indicators, NPC Indicators,
- * Object Markers, Path Marker) with the same names and defaults where the
- * feature exists. Border widths are in screen pixels, like the originals.
+ * Object Markers, Path Marker) with the same option names where the feature exists. Defaults use the
+ * original development preset. Border widths are in screen pixels, like the originals.
  */
 @ConfigGroup(HdTileMarkersConfig.GROUP)
 public interface HdTileMarkersConfig extends Config
@@ -46,7 +46,7 @@ public interface HdTileMarkersConfig extends Config
 
     @Range(min = 8, max = 200)
     @ConfigItem(keyName = "distance", name = "Draw distance", description = "Maximum distance in tiles for saved markers (ground, tile packs, NPCs, objects). Your own tile, destination and path are always drawn. Anything outside the loaded area cannot be drawn.", position = 1, section = generalSection)
-    default int distance() { return 32; }
+    default int distance() { return 200; }
 
     @ConfigItem(keyName = "tilesThroughWalls", name = "Through walls", description = "Draw all marks (tiles, hulls, clickboxes, outlines) in front of walls, objects and characters, like the normal 2D overlays. They then also get the same colour from every angle with 117 HD", position = 3, section = generalSection)
     default boolean tilesThroughWalls() { return true; }
@@ -81,7 +81,7 @@ public interface HdTileMarkersConfig extends Config
 
     @Alpha
     @ConfigItem(keyName = "highlightDestinationColor", name = "Highlight color", description = "Configures the highlight color of current destination", position = 1, section = destinationSection)
-    default Color highlightDestinationColor() { return Color.GRAY; }
+    default Color highlightDestinationColor() { return new Color(1, 199, 69, 255); }
 
     @Alpha
     @ConfigItem(keyName = "destinationTileFillColor", name = "Fill color", description = "Configures the fill color of destination tile", position = 2, section = destinationSection)
@@ -91,7 +91,7 @@ public interface HdTileMarkersConfig extends Config
     default double destinationTileBorderWidth() { return 2; }
 
     @ConfigItem(keyName = "destinationTileCornersOnly", name = "Corners only", description = "Draw only the corners of the destination tile.", position = 4, section = destinationSection)
-    default boolean destinationTileCornersOnly() { return false; }
+    default boolean destinationTileCornersOnly() { return true; }
 
     @ConfigItem(keyName = "destinationTileFadeout", name = "Fadeout", description = "Fade out the destination tile once you arrive.", position = 7, section = destinationSection)
     default boolean destinationTileFadeout() { return false; }
@@ -114,7 +114,7 @@ public interface HdTileMarkersConfig extends Config
     // Hovered tile
 
     @ConfigItem(keyName = "highlightHoveredTile", name = "Highlight hovered tile", description = "Highlights tile player is hovering with mouse", position = 0, section = hoveredSection)
-    default boolean highlightHoveredTile() { return false; }
+    default boolean highlightHoveredTile() { return true; }
 
     @Alpha
     @ConfigItem(keyName = "highlightHoveredColor", name = "Highlight color", description = "Configures the highlight color of hovered tile", position = 1, section = hoveredSection)
@@ -140,7 +140,7 @@ public interface HdTileMarkersConfig extends Config
     // Current tile
 
     @ConfigItem(keyName = "highlightCurrentTile", name = "Highlight true tile", description = "Highlights true tile player is on as seen by server", position = 0, section = currentSection)
-    default boolean highlightCurrentTile() { return false; }
+    default boolean highlightCurrentTile() { return true; }
 
     @Alpha
     @ConfigItem(keyName = "highlightCurrentColor", name = "Highlight color", description = "Configures the highlight color of current true tile", position = 1, section = currentSection)
@@ -154,7 +154,7 @@ public interface HdTileMarkersConfig extends Config
     default double currentTileBorderWidth() { return 2; }
 
     @ConfigItem(keyName = "currentTileCornersOnly", name = "Corners only", description = "Draw only the corners of the current tile.", position = 4, section = currentSection)
-    default boolean currentTileCornersOnly() { return false; }
+    default boolean currentTileCornersOnly() { return true; }
 
     @ConfigItem(keyName = "currentTileFadeout", name = "Fadeout", description = "Fade out the true tile once the player stops moving.", position = 7, section = currentSection)
     default boolean currentTileFadeout() { return false; }
@@ -164,11 +164,11 @@ public interface HdTileMarkersConfig extends Config
     default int currentTileFadeoutDelay() { return 600; }
 
     @ConfigItem(keyName = "currentTileFadeoutOutOfCombat", name = "Only fade out of combat", description = "Keep the true tile visible while you are in combat; the fadeout (and its delay) starts once combat ends", position = 9, section = currentSection)
-    default boolean currentTileFadeoutOutOfCombat() { return false; }
+    default boolean currentTileFadeoutOutOfCombat() { return true; }
 
     @Range(min = 50, max = 5000)
     @ConfigItem(keyName = "currentTileFadeoutTime", name = "Fadeout time", description = "Milliseconds to fade out the true tile", position = 8, section = currentSection)
-    default int currentTileFadeoutTime() { return 800; }
+    default int currentTileFadeoutTime() { return 1200; }
 
     @Range(min = 2, max = 20)
     @ConfigItem(keyName = "currentTileCornerSize", name = "Current Corner Size", description = "Each corner line is this fraction (1/size) of the tile side", position = 5, section = currentSection)
@@ -196,7 +196,7 @@ public interface HdTileMarkersConfig extends Config
     enum MarkerStyle { TILE, DOT }
 
     @ConfigItem(keyName = "activePathDrawLocations", name = "Draw location(s)", description = "Marks your active path in the game world and/or on the minimap", position = 0, section = activePathSection)
-    default DrawLocations activePathDrawLocations() { return DrawLocations.BOTH; }
+    default DrawLocations activePathDrawLocations() { return DrawLocations.GAME_WORLD; }
 
     @ConfigItem(keyName = "activePathDrawMode", name = "Draw mode", description = "Marks the full path or only the target tile", position = 1, section = activePathSection)
     default DrawMode activePathDrawMode() { return DrawMode.FULL_PATH; }
@@ -206,19 +206,19 @@ public interface HdTileMarkersConfig extends Config
 
     @Alpha
     @ConfigItem(keyName = "activePathStroke1", name = "Main outline color", description = "Outline color of tiles you stand on", position = 2, section = activePathSection)
-    default Color activePathStroke1() { return new Color(255, 0, 0, 255); }
+    default Color activePathStroke1() { return new Color(38, 38, 38, 69); }
 
     @Alpha
     @ConfigItem(keyName = "activePathFill1", name = "Main fill color", description = "Fill color of tiles you stand on", position = 3, section = activePathSection)
-    default Color activePathFill1() { return new Color(255, 0, 0, 50); }
+    default Color activePathFill1() { return new Color(13, 46, 10, 80); }
 
     @Alpha
     @ConfigItem(keyName = "activePathStroke2", name = "Secondary outline color", description = "Outline color of tiles you run past without standing on them", position = 4, section = activePathSection)
-    default Color activePathStroke2() { return new Color(255, 255, 0, 255); }
+    default Color activePathStroke2() { return new Color(38, 38, 38, 69); }
 
     @Alpha
     @ConfigItem(keyName = "activePathFill2", name = "Secondary fill color", description = "Fill color of tiles you run past without standing on them", position = 5, section = activePathSection)
-    default Color activePathFill2() { return new Color(255, 255, 0, 50); }
+    default Color activePathFill2() { return new Color(38, 38, 38, 80); }
 
     @ConfigItem(keyName = "activePathDisplaySetting", name = "Display", description = "When to show the active path", position = 6, section = activePathSection)
     default PathDisplaySetting activePathDisplaySetting() { return PathDisplaySetting.ALWAYS; }

@@ -1,6 +1,6 @@
 # Publication review — 2026-09-22
 
-Release: 0.1.1. Target: RuneLite 1.12.39 (the Plugin Hub target on the review date).
+Release: 0.1.2. Target: RuneLite 1.12.39 (the Plugin Hub target on the review date).
 
 ## Rules and packaging
 

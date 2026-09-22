@@ -14,7 +14,7 @@ Changes made for HD Tile Markers:
 - Package and class names (`PathMarkerPlugin` → `PathMarker`, `KeyListener` → `PathKeyListener`, `MouseListener` → `PathMouseListener`).
 - `PathMarker` is no longer a separate plugin; HD Tile Markers starts it and registers it on the event bus.
 - Lombok annotations are replaced with plain accessors.
-- Configuration lives in `HdTileMarkersConfig`, with the original option names, enums and defaults. The path border width is a HD Tile Markers addition.
+- Configuration lives in `HdTileMarkersConfig`, with the original option names and enums; defaults use the original HD Tile Markers development preset. The path border width is a HD Tile Markers addition.
 - `PathMarkerOverlay` is not included. Its display conditions are in `PathMarker.sceneTiles()`, and HD Tile Markers' scene renderer draws the tiles and dots. The minimap overlay is kept.
 - The dot marker is centered on the tile center.
 - Partial/unfound routes no longer force every step into the primary tile list while running. Checkpoint movement validation likewise no longer assumes walking solely because the route was not fully found. HD Tile Markers' extended-distance path uses the same running state and primary/secondary colors.
@@ -31,7 +31,7 @@ HD Tile Markers does not copy RuneLite source files as a whole. It reads Ground 
 - `AggroAreaSource.java`: the display rules of NPC Aggression Timer's area lines (`NpcAggroAreaOverlay.render`, `renderPath`: colour by timer, hide out of combat, 20-tile range). The lines themselves are read through the plugin's public getters.
 - `Terrain.java`: the height interpolation of `Perspective.getTileHeight`.
 - `ModelShapes.java`: the projection math of `Perspective.localToCanvasGpu` / `modelToCanvas`.
-- `HdTileMarkersConfig.java`: the option names, descriptions and defaults of Tile Indicators (`TileIndicatorsConfig`), so the settings match.
+- `HdTileMarkersConfig.java`: the option names and descriptions of Tile Indicators (`TileIndicatorsConfig`); defaults use the original HD Tile Markers development preset.
 
 ## Better NPC Highlight
 
@@ -55,7 +55,7 @@ Files in `src/main/java/com/hdtilemarkers/betternpc/` are adapted from that repo
 
 - Author: geheur (Plugin Hub `corner-tile-indicators`, version 1.0.2)
 
-HD Tile Markers contains no code from this plugin. The Tile Indicators options "Corners only" and "... Corner Size" use its option keys, names and defaults, and corner lines follow its rule of 1/size of each side (the same rule as Better NPC Highlight's corner style, also credited there to Geheur).
+HD Tile Markers contains no code from this plugin. The Tile Indicators options "Corners only" and "... Corner Size" use its option keys and names, with defaults from the HD Tile Markers development preset, and corner lines follow its rule of 1/size of each side (the same rule as Better NPC Highlight's corner style, also credited there to Geheur).
 
 ## Stealing Artefacts
 

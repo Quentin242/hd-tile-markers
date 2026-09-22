@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+Use the original development preset as the plugin defaults, including tile colors, corner markers, path colors and draw distance. Existing saved settings retain precedence.
+
 ## 0.1.1
 
 - Enforce the outline raster cell limit including padding; reject non-finite, oversized and excessively overlapping projections before raster allocation/work.
