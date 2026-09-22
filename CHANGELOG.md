@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.1
+
+- Enforce the outline raster cell limit including padding; reject non-finite, oversized and excessively overlapping projections before raster allocation/work.
+- Fall back per marker when scene rendering skips a model or tile, including the 64-model limit; preserve native NPC/Object outline settings and Better NPC Highlight style rendering.
+- Keep offscreen and transparent markers handled without drawing them twice.
+- Restore held overlays only when their owning plugin and feature are still enabled.
+- Add 13 regression tests; all 108 isolated tests pass against RuneLite 1.12.39.
+
+Live GPU/117 HD compatibility and frame cost remain unverified in this release review.
+
 ## 0.1.0
 
 Initial Plugin Hub review release:

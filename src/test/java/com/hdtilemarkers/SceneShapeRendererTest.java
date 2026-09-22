@@ -505,6 +505,33 @@ public class SceneShapeRendererTest
         assertEquals(0, renderer.carriersCreated());
     }
 
+    @Test public void childWorldMarkersRemainEligibleForFallback()
+    {
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        renderer.begin(CAMERA, 1);
+        Marker marker = new Marker("child:tile", new LocalPoint(1344, 1344, 7), 0, 1, 1,
+            Color.CYAN, Marker.NO_FILL, 2, null, false);
+        assertFalse(renderer.tile(marker));
+        assertFalse(renderer.drawn(marker.key));
+        NPC childNpc = npc(triangle(), 1344);
+        when(childNpc.getLocalLocation()).thenReturn(new LocalPoint(1344, 1344, 7));
+        assertFalse(renderer.model(ModelTarget.npc("child:npc", childNpc, Color.CYAN, Marker.NO_FILL, 2)));
+        assertFalse(renderer.drawn("child:npc"));
+        assertTrue(renderer.end());
+    }
+
+    @Test public void transparentTilesAreHandledWithoutFallbackOrSceneObjects()
+    {
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        renderer.begin(CAMERA, 1);
+        Marker marker = new Marker("invisible", new LocalPoint(1344, 1344, -1), 0, 1, 1,
+            Marker.NO_FILL, Marker.NO_FILL, 2, null, false);
+        assertFalse(renderer.tile(marker));
+        assertTrue(renderer.drawn(marker.key));
+        assertTrue(renderer.end());
+        assertEquals(0, renderer.carriersCreated());
+    }
+
     private NPC npc(Model mesh, int x)
     {
         NPC npc = mock(NPC.class);

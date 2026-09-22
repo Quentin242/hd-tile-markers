@@ -432,6 +432,25 @@ public class HdTileMarkersPlugin extends Plugin
     /** Tile markers go to 2D only without the scene route or above the tile limit. */
     boolean tilesIn2d() { return !sceneActive() || markers.size() > MAX_TILES; }
 
+    /** Includes intentionally culled offscreen models; omitted/unsupported marks stay in 2D. */
+    boolean markerInScene(String key) { return sceneActive() && renderer.drawn(key); }
+
+    java.util.Set<TileObject> objectOutlinesInScene()
+    {
+        java.util.Set<TileObject> handled = Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        java.util.Set<TileObject> missing = Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+        for (ModelTarget t : modelTargets)
+        {
+            if (t.object != null && t.outline)
+            {
+                if (markerInScene(t.key)) { handled.add(t.object); }
+                else { missing.add(t.object); }
+            }
+        }
+        handled.removeAll(missing);
+        return handled;
+    }
+
     /** Markers per source, as collected, with how many are in the scene: tells an empty source from a drawing problem. */
     private String sourceCounts()
     {

@@ -1,6 +1,6 @@
 # Publication review — 2026-09-22
 
-Release: 0.1.0. Target: RuneLite 1.12.39 (the Plugin Hub target on the review date).
+Release: 0.1.1. Target: RuneLite 1.12.39 (the Plugin Hub target on the review date).
 
 ## Rules and packaging
 
@@ -21,10 +21,16 @@ The existing [Drop Enhancer submission](https://github.com/runelite/plugin-hub/p
 
 ## Validation
 
-- Java 11 build and 95 isolated tests passed against RuneLite 1.12.39. Tests do not launch RuneLite.
+- Java 11 build and 108 isolated tests passed against RuneLite 1.12.39. Tests do not launch RuneLite.
 - Regression coverage added for prediction display/keybind/target-only settings and external-marker clearing on logout, hop, connection loss and profile change.
 - Checked Java bytecode version 55 and bundled licenses in the production JAR.
 - The Plugin Hub standard production build is also checked in an isolated directory using the official standard-build.gradle, with its RuneLite dependencies pinned to 1.12.39. The full Hub API/dependency checks run on the submission PR.
+
+## Follow-up review fixes (0.1.1)
+
+The deeper review found three defects in 0.1.0: a soft outline memory limit, global fallback decisions that omitted individual markers, and overlay reset ignoring a feature's current setting. All three are corrected in 0.1.1 with 13 regression tests. Outline raster allocation includes padded dimensions and raster work is bounded; unsupported projections remain eligible for native 2D fallback. The overlay checks handled state per marker/style and retains the source's outline feather settings. Held overlay reset uses the current feature predicate.
+
+Existing path recalculation and allocation patterns remain candidates for profiling; no measured FPS claim is made.
 
 ## Remaining manual checks
 

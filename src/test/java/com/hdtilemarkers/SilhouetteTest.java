@@ -54,6 +54,37 @@ public class SilhouetteTest
         for (int i = 0; i < expected.size(); i++) { assertArrayEquals(expected.get(i), actual.get(i), 0); }
     }
 
+    @Test public void oversizedElongatedAndInvalidProjectionsUseFallbackWithoutAllocating()
+    {
+        for (float[] dimensions : new float[][]{{5000, 5000}, {10_000_000, 1},
+            {Float.MAX_VALUE, Float.MAX_VALUE}, {Float.POSITIVE_INFINITY, 100}, {Float.NaN, 100}})
+        {
+            Silhouette.Scratch scratch = new Silhouette.Scratch();
+            assertTrue(Silhouette.trace(new float[]{0, dimensions[0], 0}, new float[]{0, 0, dimensions[1]},
+                new int[]{0}, new int[]{1}, new int[]{2}, 1, null, scratch).isEmpty());
+            assertEquals(0, scratch.grid.length);
+        }
+    }
+
+    @Test public void cellBudgetIncludesPadding()
+    {
+        Silhouette.Scratch scratch = new Silhouette.Scratch();
+        assertFalse(Silhouette.trace(new float[]{0, 512, 0}, new float[]{0, 0, 512},
+            new int[]{0}, new int[]{1}, new int[]{2}, 1, null, scratch).isEmpty());
+        assertTrue(scratch.grid.length <= Silhouette.MAX_CELLS);
+    }
+
+    @Test public void repeatedOverlappingFacesHaveABoundedRasterBudget()
+    {
+        int[] a = new int[100], b = new int[100], c = new int[100];
+        java.util.Arrays.fill(b, 1);
+        java.util.Arrays.fill(c, 2);
+        Silhouette.Scratch scratch = new Silhouette.Scratch();
+        assertTrue(Silhouette.trace(new float[]{0, 500, 0}, new float[]{0, 0, 500},
+            a, b, c, 100, null, scratch).isEmpty());
+        assertEquals(0, scratch.grid.length);
+    }
+
     private static double area(float[] p)
     {
         double sum = 0;

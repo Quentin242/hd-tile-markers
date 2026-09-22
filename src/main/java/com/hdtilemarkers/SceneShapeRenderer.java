@@ -112,8 +112,8 @@ final class SceneShapeRenderer
     boolean tile(Marker m)
     {
         WorldView wv = client.getTopLevelWorldView();
-        if (unavailable || m.point.getWorldView() != wv.getId() || m.borderWidth <= 0 && m.fill.getAlpha() == 0)
-        { return hide(m.key); }
+        if (unavailable || m.point.getWorldView() != wv.getId()) { return hide(m.key); }
+        if ((m.borderWidth <= 0 || m.color.getAlpha() == 0) && m.fill.getAlpha() == 0) { return culled(m.key); }
         layer = m.layer;
         if (m.dot) { return dot(wv, m); }
         if (m.quadX != null) { return quad(wv, m); }
@@ -132,7 +132,8 @@ final class SceneShapeRenderer
         camera.project(m.point.getX(), m.point.getY(), centerHeight, point);
         boolean corners = m.cornerDivisor > 0;
         if (!(point[2] >= ModelShapes.NEAR) || !outline.build(px, py, pd, n, point[0], point[1], point[2],
-            Math.max(0.01f, m.borderWidth * pixel)) || offscreen()) { return hide(m.key); }
+            Math.max(0.01f, m.borderWidth * pixel))) { return hide(m.key); }
+        if (offscreen()) { return culled(m.key); }
         if (!corners) { return draw(m.key, m.point, level, centerHeight, m.color, m.fill, m.borderWidth > 0); }
         // Corners only: the fill covers the whole footprint, the border only its corners.
         if (m.fill.getAlpha() > 0) { draw(m.key, m.point, level, centerHeight, m.color, m.fill, false); }
@@ -186,7 +187,8 @@ final class SceneShapeRenderer
         int centerHeight = Terrain.heightOnLevel(wv, m.point.getX(), m.point.getY(), level);
         camera.project(m.point.getX(), m.point.getY(), centerHeight, point);
         if (!(point[2] >= ModelShapes.NEAR) || !outline.build(px, py, pd, n, point[0], point[1], point[2],
-            Math.max(0.01f, m.borderWidth * pixel)) || offscreen()) { return hide(m.key); }
+            Math.max(0.01f, m.borderWidth * pixel))) { return hide(m.key); }
+        if (offscreen()) { return culled(m.key); }
         return draw(m.key, m.point, level, centerHeight, m.color, m.fill, m.borderWidth > 0);
     }
 
@@ -198,7 +200,8 @@ final class SceneShapeRenderer
         ensure(n);
         int level = Terrain.level(wv, m.point.getSceneX(), m.point.getSceneY(), m.plane), k = 0;
         for (int i = 0; i < n && k >= 0; i++) { k = sample(wv, level, Math.max(0, m.lineX[i]), Math.max(0, m.lineY[i]), k); }
-        if (k < 0 || !outline.buildStrip(px, py, pd, n, Math.max(0.01f, m.borderWidth * pixel)) || offscreen()) { return hide(m.key); }
+        if (k < 0 || !outline.buildStrip(px, py, pd, n, Math.max(0.01f, m.borderWidth * pixel))) { return hide(m.key); }
+        if (offscreen()) { return culled(m.key); }
         int height = Terrain.heightOnLevel(wv, m.point.getX(), m.point.getY(), level);
         return draw(m.key, m.point, level, height, m.color, Marker.NO_FILL, true);
     }
@@ -220,8 +223,9 @@ final class SceneShapeRenderer
             py[i] = point[1] + (float) Math.sin(angle) * radius;
             pd[i] = point[2];
         }
-        if (!outline.build(px, py, pd, n, point[0], point[1], point[2], Math.max(0.01f, m.borderWidth * pixel)) || offscreen())
+        if (!outline.build(px, py, pd, n, point[0], point[1], point[2], Math.max(0.01f, m.borderWidth * pixel)))
         { return hide(m.key); }
+        if (offscreen()) { return culled(m.key); }
         return draw(m.key, m.point, level, height, m.color, m.fill, m.borderWidth > 0);
     }
 
@@ -257,8 +261,7 @@ final class SceneShapeRenderer
         if (projected.outside && !t.clickbox)
         {
             // Handled by the scene route: do not repeat this work in the 2D fallback.
-            appended.add(t.key);
-            return false;
+            return culled(t.key);
         }
         float[] hull;
         if (t.outline)
@@ -320,8 +323,9 @@ final class SceneShapeRenderer
         float cx = 0, cy = 0;
         for (int i = 0; i < h; i++) { hx[i] = hull[i * 2]; hy[i] = hull[i * 2 + 1]; hd[i] = depth; cx += hx[i]; cy += hy[i]; }
         // Just in front of the nearest vertex, so the shape covers the model like the 2D overlay does.
-        if (!outline.build(hx, hy, hd, h, cx / h, cy / h, depth, Math.max(0.01f, t.borderWidth * pixel)) || offscreen())
+        if (!outline.build(hx, hy, hd, h, cx / h, cy / h, depth, Math.max(0.01f, t.borderWidth * pixel)))
         { return hide(t.key); }
+        if (offscreen()) { return culled(t.key); }
         int level = Terrain.level(client.getTopLevelWorldView(), location.getSceneX(), location.getSceneY(), t.plane());
         return draw(t.key, location, level, height, t.color, t.fill, t.borderWidth > 0);
     }
@@ -524,6 +528,12 @@ final class SceneShapeRenderer
     private void ensure(int n)
     {
         if (px.length < n) { px = new float[n * 2]; py = new float[n * 2]; pd = new float[n * 2]; }
+    }
+
+    private boolean culled(String key)
+    {
+        appended.add(key);
+        return false;
     }
 
     private boolean hide(String key)

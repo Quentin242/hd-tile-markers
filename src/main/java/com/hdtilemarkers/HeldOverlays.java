@@ -21,6 +21,7 @@ final class HeldOverlays
     private final Predicate<Overlay> match;
     private final List<Overlay> held = new ArrayList<>();
     private boolean drawing;
+    private Predicate<Overlay> stillShown = o -> true;
 
     HeldOverlays(OverlayManager overlays, PluginManager plugins, String pluginClass, Predicate<Overlay> match)
     {
@@ -46,6 +47,7 @@ final class HeldOverlays
      */
     void update(boolean wanted, Predicate<Overlay> stillShown)
     {
+        this.stillShown = stillShown;
         boolean running = running();
         drawing = wanted && running;
         if (drawing)
@@ -65,5 +67,5 @@ final class HeldOverlays
         held.clear();
     }
 
-    void reset() { restore(running(), o -> true); }
+    void reset() { restore(running(), stillShown); }
 }

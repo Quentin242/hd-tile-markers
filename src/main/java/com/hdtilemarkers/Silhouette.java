@@ -13,7 +13,8 @@ final class Silhouette
 {
     /** Grid cells per canvas pixel. */
     static final int CELLS_PER_PIXEL = 2;
-    private static final int MAX_CELLS = 1 << 20;
+    static final int MAX_CELLS = 1 << 20;
+    private static final long MAX_RASTER_WORK = 8L * MAX_CELLS;
 
     private Silhouette() { }
 
@@ -38,6 +39,9 @@ final class Silhouette
         {
             if (hidden != null && hidden[f]) { continue; }
             int i = a[f], j = b[f], k = c[f];
+            if (!Float.isFinite(x[i]) || !Float.isFinite(y[i]) || !Float.isFinite(x[j])
+                || !Float.isFinite(y[j]) || !Float.isFinite(x[k]) || !Float.isFinite(y[k]))
+            { return Collections.emptyList(); }
             minX = Math.min(minX, Math.min(x[i], Math.min(x[j], x[k])));
             maxX = Math.max(maxX, Math.max(x[i], Math.max(x[j], x[k])));
             minY = Math.min(minY, Math.min(y[i], Math.min(y[j], y[k])));
@@ -46,10 +50,25 @@ final class Silhouette
         if (minX > maxX) { return Collections.emptyList(); }
         float scale = CELLS_PER_PIXEL;
         // Coarser for very large shapes, to bound the work per frame.
-        while ((maxX - minX) * scale * (maxY - minY) * scale > MAX_CELLS && scale > 0.25f) { scale /= 2; }
+        double width = (double) maxX - minX, height = (double) maxY - minY;
+        while (paddedCells(width, height, scale) > MAX_CELLS && scale > 0.25f) { scale /= 2; }
+        // Oversized/elongated projections use the source's 2D outline instead. Check the
+        // padded dimensions before narrowing to ints or allocating any raster memory.
+        if (paddedCells(width, height, scale) > MAX_CELLS) { return Collections.emptyList(); }
         // One empty cell of padding on every side, so every loop is closed.
-        int w = (int) Math.ceil((maxX - minX) * scale) + 2, h = (int) Math.ceil((maxY - minY) * scale) + 2;
+        int w = (int) Math.ceil(width * scale) + 2, h = (int) Math.ceil(height * scale) + 2;
         float ox = minX - 1 / scale, oy = minY - 1 / scale;
+        // Repeated overlapping faces must not multiply raster work without a limit.
+        double work = 0;
+        for (int f = 0; f < faces; f++)
+        {
+            if (hidden != null && hidden[f]) { continue; }
+            int i = a[f], j = b[f], k = c[f];
+            double fw = (double) Math.max(x[i], Math.max(x[j], x[k])) - Math.min(x[i], Math.min(x[j], x[k]));
+            double fh = (double) Math.max(y[i], Math.max(y[j], y[k])) - Math.min(y[i], Math.min(y[j], y[k]));
+            work += paddedCells(fw, fh, scale);
+            if (work > MAX_RASTER_WORK) { return Collections.emptyList(); }
+        }
         int cells = Math.multiplyExact(w, h);
         if (scratch.grid.length < cells) { scratch.grid = new boolean[cells]; }
         else { Arrays.fill(scratch.grid, 0, cells, false); }
@@ -69,6 +88,11 @@ final class Silhouette
             loops.add(simple);
         }
         return loops;
+    }
+
+    private static double paddedCells(double width, double height, float scale)
+    {
+        return (Math.ceil(width * scale) + 2) * (Math.ceil(height * scale) + 2);
     }
 
     /** Marks cells whose centres lie inside the triangle (grid coordinates). */

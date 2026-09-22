@@ -57,14 +57,15 @@ final class IndicatorOverlay extends Overlay
                 g.drawString(status, x, y);
             }
             // Without the scene route, RuneLite's outline renderer draws outlines in 2D.
+            java.util.Set<net.runelite.api.TileObject> sceneObjectOutlines = plugin.objectOutlinesInScene();
             for (ObjectMarkerSource.Resolved o : plugin.objectOutlines())
             {
-                if (!plugin.sceneActive())
+                if (!sceneObjectOutlines.contains(o.object))
                 { outlines.drawOutline(o.object, (int) o.borderWidth, o.border, o.feather); }
             }
             for (NPC npc : plugin.npcOutlines())
             {
-                if (!plugin.sceneActive())
+                if (!plugin.markerInScene("npc:" + npc.getIndex() + ":outline"))
                 { outlines.drawOutline(npc, (int) plugin.npcConfig().borderWidth(), plugin.npcOutlineColor(npc), plugin.npcConfig().outlineFeather()); }
             }
             if (plugin.drawsBetterNpc())
@@ -74,22 +75,30 @@ final class IndicatorOverlay extends Overlay
                 try
                 {
                     plugin.betterNpcView().visit((info, style) -> {
-                        if (!plugin.sceneActive() || !BetterNpcSource.sceneCapable(plugin.betterNpcView().config(), style))
+                        if (!plugin.markerInScene(BetterNpcSource.key(info.getNpc(), style)))
                         { plugin.betterNpcView().render2d(bnh, info, style); }
                     });
-                    plugin.betterNpcView().renderExtras(bnh, index -> !plugin.tilesIn2d());
+                    plugin.betterNpcView().renderExtras(bnh, index -> plugin.markerInScene(BetterNpcSource.respawnKey(index)));
                 }
                 finally { bnh.dispose(); }
             }
             for (NPC guard : plugin.stealingArrows()) { facingArrow(g, guard); }
             for (ModelTarget t : plugin.modelTargets())
             {
-                if (plugin.sceneActive()) { continue; }
+                // Better NPC Highlight owns its style-specific fallback above.
+                if (t.key.startsWith("bnh:") || plugin.markerInScene(t.key)) { continue; }
+                if (t.outline)
+                {
+                    // Core NPC/Object outline styles retain their own feather settings above.
+                    if (t.npc != null && !t.key.startsWith("npc:"))
+                    { outlines.drawOutline(t.npc, (int) t.borderWidth, t.color, 0); }
+                    continue;
+                }
                 Shape shape = t.shape();
                 if (shape != null) { draw(g, shape, t.color, t.fill, t.borderWidth); }
             }
             Marker hover = plugin.hover();
-            if (hover != null && (plugin.hoverIn2d() || plugin.tilesIn2d()))
+            if (hover != null && (plugin.hoverIn2d() || !plugin.markerInScene(hover.key)))
             {
                 Polygon shape = polygon(hover);
                 if (shape != null) { draw(g, shape, hover); }
@@ -101,7 +110,8 @@ final class IndicatorOverlay extends Overlay
             {
                 // Without replacement the original Ground Markers overlay draws these.
                 if (m.ground && !plugin.replacedGround()) { continue; }
-                if (plugin.tilesIn2d())
+                // BNH's tiles and respawns use its own fallback, avoiding a second copy.
+                if (!m.key.startsWith("bnh:") && !plugin.markerInScene(m.key))
                 {
                     Shape shape = m.dot ? dot(m) : m.lineX != null ? line(m) : polygon(m);
                     if (shape != null) { draw(g, shape, m); }
