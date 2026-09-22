@@ -1,0 +1,22 @@
+.gradle/
+build/
+out/
+.idea/
+*.iml
+
+# Local development and assistant tooling, not part of the plugin
+AGENTS.md
+CLAUDE.md
+.claude/
+.cursor/
+.codex/
+.aider*
+.github/copilot-instructions.md
+
+# Local machine files and secrets
+.env
+.env.*
+*.log
+*.jks
+*.keystore
+.DS_Store

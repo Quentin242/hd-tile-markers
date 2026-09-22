@@ -1,0 +1,39 @@
+plugins { id 'java' }
+repositories {
+    maven { url = 'https://repo.runelite.net'; content { includeGroupByRegex('net\\.runelite.*') } }
+    mavenCentral()
+}
+def runeLiteVersion = findProperty('runeliteVersion') ?: 'latest.release'
+dependencies {
+    compileOnly "net.runelite:client:${runeLiteVersion}"
+    // Used by the adapted Better NPC Highlight classes.
+    compileOnly 'org.projectlombok:lombok:1.18.30'
+    annotationProcessor 'org.projectlombok:lombok:1.18.30'
+    testCompileOnly 'org.projectlombok:lombok:1.18.30'
+    testAnnotationProcessor 'org.projectlombok:lombok:1.18.30'
+    testImplementation "net.runelite:client:${runeLiteVersion}"
+    testImplementation "net.runelite:jshell:${runeLiteVersion}"
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.mockito:mockito-core:4.11.0'
+}
+group = 'com.hdtilemarkers'
+version = '0.1.0'
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8'; options.release.set(11) }
+tasks.register('run', JavaExec) {
+    classpath = sourceSets.test.runtimeClasspath
+    mainClass = 'com.hdtilemarkers.DevelopmentLauncher'
+    jvmArgs '-ea'
+    args '--developer-mode', '--debug'
+}
+
+tasks.register('writeDevClasspath') {
+    dependsOn testClasses
+    def destination = layout.buildDirectory.file('dev/classpath.txt')
+    inputs.files(sourceSets.test.runtimeClasspath)
+    outputs.file(destination)
+    doLast {
+        def file = destination.get().asFile
+        file.parentFile.mkdirs()
+        file.text = sourceSets.test.runtimeClasspath.asPath
+    }
+}

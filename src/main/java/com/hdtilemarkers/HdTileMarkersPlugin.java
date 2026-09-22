@@ -1,0 +1,469 @@
+package com.hdtilemarkers;
+
+import com.hdtilemarkers.pathmarker.PathMarker;
+import com.google.inject.Provides;
+import java.util.Collections;
+import java.util.List;
+import javax.inject.Inject;
+import net.runelite.api.*;
+import net.runelite.api.coords.LocalPoint;
+import net.runelite.api.coords.WorldPoint;
+import net.runelite.api.events.*;
+import net.runelite.client.callback.ClientThread;
+import net.runelite.client.config.ConfigManager;
+import net.runelite.client.eventbus.EventBus;
+import net.runelite.client.eventbus.Subscribe;
+import net.runelite.client.events.ConfigChanged;
+import net.runelite.client.events.ProfileChanged;
+import net.runelite.client.events.PluginChanged;
+import net.runelite.client.plugins.*;
+import net.runelite.client.plugins.groundmarkers.GroundMarkerPlugin;
+import net.runelite.client.plugins.groundmarkers.GroundMarkerOverlay;
+import net.runelite.client.plugins.npchighlight.NpcIndicatorsPlugin;
+import net.runelite.client.plugins.objectindicators.ObjectIndicatorsPlugin;
+import net.runelite.client.ui.overlay.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+@PluginDescriptor(name = "HD Tile Markers", description = "Sharp tile, NPC, object and path markers drawn in the game world, also in stretched mode",
+    tags = {"tiles", "markers", "npcs", "objects", "path", "stretched"})
+@PluginDependency(GroundMarkerPlugin.class)
+@PluginDependency(ObjectIndicatorsPlugin.class)
+@PluginDependency(NpcIndicatorsPlugin.class)
+@PluginDependency(net.runelite.client.plugins.npcunaggroarea.NpcAggroAreaPlugin.class)
+// Better NPC Highlight's task highlighting reads the Slayer plugin's task.
+@PluginDependency(net.runelite.client.plugins.slayer.SlayerPlugin.class)
+public class HdTileMarkersPlugin extends Plugin
+{
+    static final int MAX_TILES = 1500, MAX_MODELS = 64;
+    private static final Logger log = LoggerFactory.getLogger(HdTileMarkersPlugin.class);
+    @Inject private Client client;
+    @Inject private ClientThread clientThread;
+    @Inject private EventBus eventBus;
+    @Inject private HdTileMarkersConfig config;
+    @Inject private MarkerSources sources;
+    @Inject private SceneShapeRenderer renderer;
+    @Inject private PathMarker pathMarker;
+    @Inject private com.hdtilemarkers.betternpc.BetterNpcEvents betterNpcEvents;
+    @Inject private com.hdtilemarkers.betternpc.BetterNpcView betterNpcView;
+    @Inject private BetterNpcSource betterNpc;
+    @Inject private StealingArtefactsSource stealingArtefacts;
+    @Inject private SailingSource sailing;
+    @Inject private ExternalMarks externalMarks;
+    @Inject private AggroAreaSource aggroArea;
+    @Inject private IndicatorOverlay overlay;
+    @Inject private RenderTrace trace;
+    @Inject private net.runelite.client.callback.RenderCallbackManager renderCallbacks;
+    @Inject private OverlayManager overlays;
+    @Inject private PluginManager plugins;
+    @Inject private ConfigManager configManager;
+    @Inject private GroundMarkerPlugin groundPlugin;
+    @Inject private ObjectIndicatorsPlugin objectPlugin;
+    @Inject private NpcIndicatorsPlugin npcPlugin;
+    private GroundMarkerOverlay originalGround;
+    private Overlay originalObjects;
+    /** Plugin Hub plugins' scene overlays, held back while HD Tile Markers draws their marks (matched by class name). */
+    private HeldOverlays heldBetterNpc, heldTilePacks, heldStealing, heldSailing, heldAggroArea;
+    private static final java.util.Set<String> STEALING_OVERLAYS = new java.util.HashSet<>(java.util.Arrays.asList(
+        "StealingArtefactsHouseOverlay", "StealingArtefactsPatrolOverlay", "StealingArtefactsKhaledOverlay"));
+    private volatile boolean running, dirty, failed;
+    private boolean sceneReady, sceneUnavailable;
+    private int sceneShapes;
+    private Boolean loggedReady;
+    /** Diagnostics: how often everything was rebuilt, and why last. */
+    private int rebuilds;
+    private String lastRebuild = "";
+    private List<Marker> markers = Collections.emptyList();
+    private List<ModelTarget> modelTargets = Collections.emptyList();
+    private Marker hover;
+
+    @Provides HdTileMarkersConfig provideConfig(ConfigManager manager)
+    { return manager.getConfig(HdTileMarkersConfig.class); }
+
+    @Override protected void startUp()
+    {
+        running = true; dirty = true; failed = false; sceneUnavailable = false;
+        if (heldBetterNpc == null)
+        {
+            heldBetterNpc = new HeldOverlays(overlays, plugins, "com.betternpchighlight.BetterNpcHighlightPlugin",
+                o -> o.getClass().getName().equals("com.betternpchighlight.overlays.BetterNpcHighlightOverlay"));
+            // Tile Packs' overlay has the same name as Ground Markers'; its class tells them apart.
+            heldTilePacks = new HeldOverlays(overlays, plugins, "com.tilepacks.TilePacksPlugin",
+                o -> o.getClass().getName().equals("com.tilepacks.ui.overlay.GroundMarkerOverlay"));
+            heldStealing = new HeldOverlays(overlays, plugins, "io.cbitler.stealingartefacts.StealingArtefactsPlugin",
+                o -> STEALING_OVERLAYS.contains(o.getClass().getSimpleName()) && o.getClass().getName().startsWith("io.cbitler.stealingartefacts."));
+            heldAggroArea = new HeldOverlays(overlays, plugins, AggroAreaSource.PLUGIN, o -> o.getClass().getName().equals(AggroAreaSource.OVERLAY));
+            heldSailing = new HeldOverlays(overlays, plugins, "com.duckblade.osrs.sailing.SailingPlugin",
+                o -> SailingSource.OVERLAYS.contains(o.getClass().getSimpleName()) && o.getClass().getName().startsWith(SailingSource.PACKAGE));
+        }
+        overlays.add(overlay);
+        tracing(config.debug());
+        pathMarker.startUp();
+        eventBus.register(pathMarker);
+        eventBus.register(betterNpcEvents);
+        eventBus.register(stealingArtefacts);
+        eventBus.register(sailing);
+        eventBus.register(externalMarks);
+        clientThread.invokeLater(betterNpcEvents::startUp);
+    }
+
+    @Override protected void shutDown()
+    {
+        running = false;
+        overlays.remove(overlay);
+        tracing(false);
+        eventBus.unregister(pathMarker);
+        pathMarker.shutDown();
+        eventBus.unregister(betterNpcEvents);
+        eventBus.unregister(stealingArtefacts);
+        eventBus.unregister(sailing);
+        eventBus.unregister(externalMarks);
+        externalMarks.clear();
+        betterNpcEvents.shutDown();
+        clientThread.invoke(() -> { if (!running) { reset(); sources.clear(); } });
+    }
+
+    private void reset()
+    {
+        renderer.reset();
+        markers = Collections.emptyList();
+        modelTargets = Collections.emptyList();
+        hover = null;
+        sceneReady = false;
+        sceneShapes = 0;
+        restoreGround();
+        restoreObjects();
+        for (HeldOverlays held : new HeldOverlays[]{heldBetterNpc, heldTilePacks, heldStealing, heldSailing, heldAggroArea})
+        {
+            if (held != null) { held.reset(); }
+        }
+    }
+
+    /** Collects markers once per client tick; the scene is written in onBeforeRender. */
+    @Subscribe public void onPostClientTick(PostClientTick event)
+    {
+        if (!running || client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null) { return; }
+        try
+        {
+            if (dirty) { reset(); sources.rebuild(); stealingArtefacts.rebuild(client.getTopLevelWorldView()); sailing.rebuild(client.getTopLevelWorldView()); dirty = false; rebuilds++; }
+            sources.groundEnabled = plugins.isPluginEnabled(groundPlugin);
+            sources.objectsEnabled = plugins.isPluginEnabled(objectPlugin);
+            sources.npcsEnabled = plugins.isPluginEnabled(npcPlugin);
+            List<Marker> tiles = sources.collect(pathTiles());
+            List<ModelTarget> models = sources.modelTargets();
+            // Replace the original overlays unless the scene route has actually failed. Without GPU
+            // HD Tile Markers draws 2D itself; merely not having drawn a frame yet (start-up) is not a failure.
+            boolean drawing = !client.isGpu() || sceneActive();
+            // Plugin Hub plugins: only while the plugin runs and the scene route works; otherwise its own overlay draws.
+            heldBetterNpc.update(sceneActive(), o -> true);
+            if (heldBetterNpc.drawing())
+            {
+                tiles = new java.util.ArrayList<>(tiles);
+                models = new java.util.ArrayList<>(models);
+                betterNpc.collect(tiles, models);
+            }
+            // Stealing Artefacts: the same rule, only while its plugin runs and the scene route works.
+            heldStealing.update(config.stealingArtefacts() && sceneActive(), o -> true);
+            if (heldStealing.drawing())
+            {
+                models = new java.util.ArrayList<>(models);
+                stealingArtefacts.collect(models);
+            }
+            // Sailing: its sea overlays; the ones on the boat itself stay its own.
+            heldSailing.update(config.sailing() && sceneActive(), o -> sailingStillShown(o.getClass().getSimpleName()));
+            if (heldSailing.drawing())
+            {
+                tiles = new java.util.ArrayList<>(tiles);
+                sailing.collect(tiles);
+            }
+            // NPC Aggression Timer's area lines; its timer infobox stays its own.
+            heldAggroArea.update(config.aggressionArea() && sceneActive(), o -> true);
+            if (heldAggroArea.drawing())
+            {
+                tiles = new java.util.ArrayList<>(tiles);
+                aggroArea.collect(tiles);
+            }
+            // Marks other plugins sent through PluginMessage.
+            tiles = new java.util.ArrayList<>(tiles);
+            models = new java.util.ArrayList<>(models);
+            externalMarks.collect(tiles, models);
+            markers = tiles;
+            modelTargets = models;
+            if (config.ground() && config.replaceGround() && sources.validGround() && drawing) { suppressGround(); }
+            else { restoreGround(); }
+            if (config.objectMarkers() && config.replaceObjectMarkers() && sources.validObjects() && drawing) { suppressObjects(); }
+            else { restoreObjects(); }
+            heldTilePacks.update(config.tilePacks() && drawing, o -> true);
+            sources.tilePacksEnabled = heldTilePacks.drawing();
+        }
+        catch (RuntimeException ex)
+        {
+            fail(ex);
+        }
+    }
+
+    /** Rebuilds all scene shapes for the camera of the frame about to be drawn. */
+    @Subscribe public void onBeforeRender(BeforeRender event)
+    {
+        if (!running || dirty || client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null) { return; }
+        if (!client.isGpu() || failed)
+        {
+            renderer.clear();
+            sceneReady = false;
+            return;
+        }
+        try
+        {
+            Player player = client.getLocalPlayer();
+            LocalPoint xray = config.tilesThroughWalls() ? player.getLocalLocation() : null;
+            renderer.begin(camera(), 1f / stretchScale(), xray, player.getWorldView().getPlane());
+            int drawn = 0;
+            hover = sources.hover();
+            if (hover != null && !config.hoveredTileIn2d() && renderer.tile(hover)) { drawn++; }
+            // Beyond the limit, tiles keep their 2D fallback rather than being dropped.
+            if (markers.size() <= MAX_TILES)
+            {
+                for (Marker m : markers) { if (renderer.tile(m)) { drawn++; } }
+            }
+            for (int i = 0; i < Math.min(MAX_MODELS, modelTargets.size()); i++)
+            {
+                if (renderer.model(modelTargets.get(i))) { drawn++; }
+            }
+            boolean ok = renderer.end();
+            if (loggedReady == null || ok != loggedReady)
+            {
+                log.info("HD Tile Markers scene rendering {} ({} shapes)", ok ? "active" : "unavailable", drawn);
+                loggedReady = ok;
+            }
+            sceneReady = ok;
+            sceneUnavailable = !ok;
+            sceneShapes = drawn;
+        }
+        catch (RuntimeException ex)
+        {
+            fail(ex);
+        }
+    }
+
+    private ModelShapes.Camera camera()
+    {
+        return new ModelShapes.Camera(client.getCameraFpX(), client.getCameraFpY(), client.getCameraFpZ(),
+            client.getCameraFpPitch(), client.getCameraFpYaw(), client.getScale(), client.getViewportXOffset(),
+            client.getViewportYOffset(), client.getViewportWidth(), client.getViewportHeight());
+    }
+
+    /**
+     * Path Marker's tiles plus, while a walk prediction is active, a predicted path
+     * to it: when Path Marker has none, or the target lies beyond the loaded area.
+     */
+    List<PathMarker.SceneTile> pathTiles()
+    {
+        List<PathMarker.SceneTile> tiles = pathMarker.sceneTiles();
+        Player player = client.getLocalPlayer();
+        WorldPoint target = sources.predictedTarget(player, System.currentTimeMillis());
+        HdTileMarkersConfig.DrawLocations where = config.activePathDrawLocations();
+        boolean gameWorld = where == HdTileMarkersConfig.DrawLocations.BOTH || where == HdTileMarkersConfig.DrawLocations.GAME_WORLD;
+        HdTileMarkersConfig.PathDisplaySetting display = config.activePathDisplaySetting();
+        if (target == null || !gameWorld || display == HdTileMarkersConfig.PathDisplaySetting.NEVER
+            || (display != HdTileMarkersConfig.PathDisplaySetting.ALWAYS && !pathMarker.isKeyDisplayActivePath())
+            || (pathMarker.isPathActive() && !MarkerSources.outside(player.getWorldView(), target))) { return tiles; }
+        List<PathMarker.SceneTile> result = new java.util.ArrayList<>(tiles);
+        if (config.activePathDrawMode() == HdTileMarkersConfig.DrawMode.TARGET_TILE)
+        {
+            result.add(new PathMarker.SceneTile(target, config.activePathStroke1(), config.activePathFill1(),
+                config.activePathMarkerStyle() == HdTileMarkersConfig.MarkerStyle.DOT, true));
+            return result;
+        }
+        result.addAll(WalkPredictor.path(player, pathMarker.pathfinder, target, config.activePathStroke1(), config.activePathFill1(),
+            config.activePathStroke2(), config.activePathFill2(),
+            config.activePathMarkerStyle() == HdTileMarkersConfig.MarkerStyle.DOT, pathMarker.runningForPath()));
+        return result;
+    }
+
+    private void fail(RuntimeException ex)
+    {
+        if (!failed) { log.warn("Scene markers unavailable; using 2D markers and the original ground overlay", ex); }
+        failed = true;
+        reset();
+    }
+
+    /** Canvas pixels per screen pixel is 1 / this; the GPU scene is rasterized at the stretched size. */
+    private float stretchScale()
+    {
+        if (!client.isStretchedEnabled()) { return 1f; }
+        java.awt.Dimension real = client.getRealDimensions(), stretched = client.getStretchedDimensions();
+        if (real == null || stretched == null || real.width <= 0 || stretched.width <= 0) { return 1f; }
+        return stretched.width / (float) real.width;
+    }
+
+    private void suppressGround()
+    {
+        if (originalGround != null) { return; }
+        overlays.anyMatch(candidate -> {
+            if (candidate instanceof GroundMarkerOverlay)
+            { originalGround = (GroundMarkerOverlay) candidate; return true; }
+            return false;
+        });
+        if (originalGround != null) { overlays.remove(originalGround); }
+    }
+
+    private void suppressObjects()
+    {
+        if (originalObjects != null) { return; }
+        // Object Markers' overlay class is not public; RuneLite names overlays after their class.
+        overlays.anyMatch(candidate -> {
+            if ("ObjectIndicatorsOverlay".equals(candidate.getName())) { originalObjects = candidate; return true; }
+            return false;
+        });
+        if (originalObjects != null) { overlays.remove(originalObjects); }
+    }
+
+    /** Whether Sailing itself would still show this overlay: its feature toggles, as their isEnabled. */
+    private boolean sailingStillShown(String overlay)
+    {
+        java.util.function.Predicate<String> on = key -> !"false".equals(configManager.getConfiguration(SailingSource.GROUP, key));
+        switch (overlay)
+        {
+            case "RapidsOverlay": return on.test("highlightRapids");
+            case "LightningCloudsOverlay": return on.test("highlightLightningCloudStrikes");
+            case "LostCargoHighlighter": return on.test("barracudaHighlightLostCrates");
+            case "SalvagingHighlight": return on.test("salvagingHighlightActiveWrecks") || on.test("salvagingHighlightInactiveWrecks")
+                || "true".equals(configManager.getConfiguration(SailingSource.GROUP, "salvagingHideHighLevelWrecks"));
+            case "TrueTileIndicator":
+            {
+                String mode = configManager.getConfiguration(SailingSource.GROUP, "navigationTrueTileIndicator");
+                return mode != null && !"OFF".equals(mode);
+            }
+            default: return true;
+        }
+    }
+
+    private void restoreObjects()
+    {
+        if (originalObjects == null) { return; }
+        if (plugins.isPluginEnabled(objectPlugin)) { overlays.add(originalObjects); }
+        originalObjects = null;
+    }
+
+    private void restoreGround()
+    {
+        if (originalGround == null) { return; }
+        if (plugins.isPluginEnabled(groundPlugin)) { overlays.add(originalGround); }
+        originalGround = null;
+    }
+
+    /** Walk here: remember the clicked tile for the predicted destination. */
+    @Subscribe public void onMenuOptionClicked(MenuOptionClicked e)
+    {
+        if (e.getMenuAction() != MenuAction.WALK || client.getLocalPlayer() == null) { return; }
+        WorldView wv = client.getLocalPlayer().getWorldView();
+        Tile tile = wv.getSelectedSceneTile();
+        WorldPoint target = tile != null ? tile.getWorldLocation() : null;
+        if (target == null && config.predictWalk() && client.getMouseCanvasPosition() != null)
+        {
+            // No tile under the mouse, such as 117 HD's extended terrain: find where the click meets the ground.
+            target = WalkPredictor.raycast(camera(), client.getMouseCanvasPosition().getX(), client.getMouseCanvasPosition().getY(),
+                wv, wv.getPlane());
+        }
+        if (target != null) { sources.walkedTo(target); }
+    }
+
+    @Subscribe public void onGameStateChanged(GameStateChanged e)
+    { if (e.getGameState() != GameState.LOGGED_IN) { reset(); sources.clear(); dirty = true; failed = false; } }
+    @Subscribe public void onWorldViewLoaded(WorldViewLoaded e) { dirty = true; lastRebuild = "worldview loaded"; }
+    @Subscribe public void onWorldViewUnloaded(WorldViewUnloaded e) { sources.removeWorldView(e.getWorldView()); reset(); dirty = true; lastRebuild = "worldview unloaded"; }
+    @Subscribe public void onProfileChanged(ProfileChanged e)
+    { clientThread.invoke(() -> { if (running) { reset(); dirty = true; failed = false; } }); }
+    @Subscribe public void onPluginChanged(PluginChanged e) { dirty = true; failed = false; lastRebuild = "plugin " + e.getPlugin().getName(); }
+    /** The render trace only runs while debug info is shown: it is called for every object the client draws. */
+    private boolean traced;
+
+    private void tracing(boolean on)
+    {
+        if (on == traced) { return; }
+        if (on) { renderCallbacks.register(trace); } else { renderCallbacks.unregister(trace); }
+        traced = on;
+    }
+
+    @Subscribe public void onConfigChanged(ConfigChanged e)
+    {
+        if (e.getGroup().equals(HdTileMarkersConfig.GROUP) && "debug".equals(e.getKey())) { tracing(running && config.debug()); return; }
+        // Marks and settings of the plugins HD Tile Markers reads: rebuild when they change.
+        String group = e.getGroup();
+        if (group.equals(HdTileMarkersConfig.GROUP) || group.equals("groundMarker")
+            || group.equals(TilePackSource.DATA_GROUP) || group.equals(TilePackSource.SETTINGS_GROUP)
+            || group.equals(ObjectMarkerSource.GROUP) || group.equals(net.runelite.client.plugins.npchighlight.NpcIndicatorsConfig.GROUP))
+        { dirty = true; failed = false; lastRebuild = group + "." + e.getKey(); }
+    }
+    @Subscribe public void onHitsplatApplied(HitsplatApplied e) { sources.hitsplat(e.getActor(), System.currentTimeMillis()); }
+    @Subscribe public void onNpcSpawned(NpcSpawned e) { sources.add(e.getNpc()); }
+    @Subscribe public void onNpcChanged(NpcChanged e) { sources.add(e.getNpc()); }
+    @Subscribe public void onNpcDespawned(NpcDespawned e) { sources.remove(e.getNpc()); }
+    @Subscribe public void onGameObjectSpawned(GameObjectSpawned e) { sources.add(e.getGameObject()); }
+    @Subscribe public void onGameObjectDespawned(GameObjectDespawned e) { sources.remove(e.getGameObject()); }
+    @Subscribe public void onWallObjectSpawned(WallObjectSpawned e) { sources.add(e.getWallObject()); }
+    @Subscribe public void onWallObjectDespawned(WallObjectDespawned e) { sources.remove(e.getWallObject()); }
+    @Subscribe public void onDecorativeObjectSpawned(DecorativeObjectSpawned e) { sources.add(e.getDecorativeObject()); }
+    @Subscribe public void onDecorativeObjectDespawned(DecorativeObjectDespawned e) { sources.remove(e.getDecorativeObject()); }
+    @Subscribe public void onGroundObjectSpawned(GroundObjectSpawned e) { sources.add(e.getGroundObject()); }
+    @Subscribe public void onGroundObjectDespawned(GroundObjectDespawned e) { sources.remove(e.getGroundObject()); }
+
+    List<Marker> markers() { return markers; }
+    List<ModelTarget> modelTargets() { return modelTargets; }
+    boolean hoverIn2d() { return config.hoveredTileIn2d(); }
+
+    /** Guards whose facing arrow HD Tile Markers draws while Stealing Artefacts' patrol overlay is held back. */
+    List<NPC> stealingArrows() { return heldStealing == null || !heldStealing.drawing() ? java.util.Collections.emptyList() : stealingArtefacts.facingArrows(); }
+
+    /** The hovered tile for the overlay: read at overlay time when drawn in 2D, for zero delay. */
+    Marker hover() { return config.hoveredTileIn2d() || !client.isGpu() || failed ? sources.hover() : hover; }
+    boolean replacedGround() { return originalGround != null; }
+    /** Whether HD Tile Markers draws Better NPC Highlight (its overlay is held back). */
+    boolean drawsBetterNpc() { return heldBetterNpc != null && heldBetterNpc.drawing(); }
+    com.hdtilemarkers.betternpc.BetterNpcView betterNpcView() { return betterNpcView; }
+    List<ObjectMarkerSource.Resolved> objectOutlines() { return sources.objectOutlines(); }
+    List<NPC> npcOutlines() { return sources.npcOutlines(); }
+    java.awt.Color npcOutlineColor(NPC npc) { return sources.outlineColor(npc); }
+    net.runelite.client.plugins.npchighlight.NpcIndicatorsConfig npcConfig() { return sources.npcConfig(); }
+
+    /** The scene route works: GPU on, no rendering error, carrier models available. */
+    boolean sceneActive() { return client.isGpu() && !failed && !sceneUnavailable; }
+
+    /** Tile markers go to 2D only without the scene route or above the tile limit. */
+    boolean tilesIn2d() { return !sceneActive() || markers.size() > MAX_TILES; }
+
+    /** Markers per source, as collected, with how many are in the scene: tells an empty source from a drawing problem. */
+    private String sourceCounts()
+    {
+        String[][] kinds = {{"ground", "ground:"}, {"packs", "tilepack:"}, {"path", "path:"}, {"npc", "npc:"}, {"bnh", "bnh:"}, {"obj", "object:"}};
+        StringBuilder out = new StringBuilder();
+        for (String[] kind : kinds)
+        {
+            int total = 0, drawn = 0;
+            for (Marker m : markers) { if (m.key.startsWith(kind[1])) { total++; if (renderer.drawn(m.key)) { drawn++; } } }
+            for (ModelTarget t : modelTargets) { if (t.key.startsWith(kind[1])) { total++; if (renderer.drawn(t.key)) { drawn++; } } }
+            if (total > 0) { out.append(out.length() == 0 ? "" : ", ").append(kind[0]).append(' ').append(drawn).append('/').append(total); }
+        }
+        return out.length() == 0 ? "no markers" : out.toString();
+    }
+
+    /** Source plugins that are off, so their marks are not drawn. */
+    private String sourcesOff()
+    {
+        StringBuilder off = new StringBuilder();
+        if (!sources.groundEnabled) { off.append(", Ground Markers"); }
+        if (!sources.objectsEnabled) { off.append(", Object Markers"); }
+        if (!sources.npcsEnabled) { off.append(", NPC Indicators"); }
+        return off.length() == 0 ? "" : " | off:" + off.substring(1);
+    }
+
+    String rendererStatus()
+    {
+        if (failed) { return "HD Tile Markers: 2D fallback - rendering error"; }
+        if (!client.isGpu()) { return "HD Tile Markers: 2D fallback - GPU/117 HD inactive"; }
+        if (!sceneReady) { return "HD Tile Markers: 2D fallback - scene model unavailable"; }
+        String limit = markers.size() > MAX_TILES ? " (tiles in 2D: over " + MAX_TILES + ")" : "";
+        return "HD Tile Markers: " + trace.summary() + " | " + sceneShapes + " shapes" + limit + " | " + sourceCounts() + sourcesOff()
+            + " | rebuilds " + rebuilds + (lastRebuild.isEmpty() ? "" : " (" + lastRebuild + ")") + ", new models " + renderer.carriersCreated();
+    }
+}

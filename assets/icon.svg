@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <title>HD Tile Markers tile outline</title>
+  <path d="M24 7 45 19 24 32 3 19Z" fill="#133d48" fill-opacity=".55"/>
+  <path d="M3 24 24 37 45 24M3 29 24 42 45 29" fill="none" stroke="#357482" stroke-width="1.5" stroke-linejoin="round"/>
+  <path d="M24 6 45 19 24 32 3 19Z" fill="none" stroke="#54f4eb" stroke-width="2.5" stroke-linejoin="round"/>
+  <path d="m15 11 9-5 9 5M37 14l8 5-8 5M33 27l-9 5-9-5M11 24l-8-5 8-5" fill="none" stroke="#dcfffc" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>
