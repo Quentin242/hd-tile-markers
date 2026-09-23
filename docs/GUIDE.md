@@ -75,6 +75,5 @@ Java 11 and the Gradle wrapper:
 
 `test` uses synthetic data and mocks and does not launch RuneLite. `run` starts a separate development client for manual testing. For Jagex accounts, use RuneLite's [development login instructions](https://github.com/runelite/runelite/wiki/Using-Jagex-Accounts). The build defaults to the latest release; `-PruneliteVersion=1.12.39` reproduces the initial local build.
 
-Plugin Hub approval is pending maintainer review. See [PUBLICATION-REVIEW.md](../PUBLICATION-REVIEW.md) for validation and remaining manual checks.
 
 Source: [BSD-2-Clause](../LICENSE). Adapted code and its licenses: [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).

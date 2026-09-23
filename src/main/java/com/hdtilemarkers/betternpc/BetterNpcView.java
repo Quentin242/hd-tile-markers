@@ -214,14 +214,14 @@ public class BetterNpcView
 			return null;
 		}
 		final WorldPoint respawnLocation = npc.getPossibleRespawnLocations().get(0);
-		final LocalPoint lp = LocalPoint.fromWorld(client, respawnLocation.getX(), respawnLocation.getY());
+		final LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), respawnLocation);
 		if (lp == null)
 		{
 			return null;
 		}
-		return new LocalPoint(
-				lp.getX() + Perspective.LOCAL_TILE_SIZE * (npc.getNpcSize() - 1) / 2,
-				lp.getY() + Perspective.LOCAL_TILE_SIZE * (npc.getNpcSize() - 1) / 2);
+		return lp.plus(
+				Perspective.LOCAL_TILE_SIZE * (npc.getNpcSize() - 1) / 2,
+				Perspective.LOCAL_TILE_SIZE * (npc.getNpcSize() - 1) / 2);
 	}
 
 	/** Names above NPCs and respawn timers, as the original overlay draws them. */
@@ -340,10 +340,10 @@ public class BetterNpcView
 					fillAlpha = isTask ? config.taskFillColor().getAlpha() : npcInfo.getTrueTile().getFill().getAlpha();
 					antialias = isTask ? config.slayerAA() : config.trueTileAA();
 
-					lp = LocalPoint.fromWorld(client, npc.getWorldLocation());
+					lp = LocalPoint.fromWorld(npc.getWorldView(), npc.getWorldLocation());
 					if (lp != null)
 					{
-						lp = new LocalPoint(lp.getX() + size * 128 / 2 - 64, lp.getY() + size * 128 / 2 - 64);
+						lp = lp.plus(size * 128 / 2 - 64, size * 128 / 2 - 64);
 						tilePoly = Perspective.getCanvasTileAreaPoly(client, lp, size);
 						if (tilePoly != null)
 						{
@@ -372,9 +372,7 @@ public class BetterNpcView
 					lp = npc.getLocalLocation();
 					if (lp != null)
 					{
-						int x = lp.getX() - (size - 1) * 128 / 2;
-						int y = lp.getY() - (size - 1) * 128 / 2;
-						tilePoly = Perspective.getCanvasTilePoly(client, new LocalPoint(x, y));
+						tilePoly = Perspective.getCanvasTilePoly(client, lp.plus(-(size - 1) * 128 / 2, -(size - 1) * 128 / 2));
 						if (tilePoly != null)
 						{
 							switch (config.swTileLines())
@@ -399,7 +397,7 @@ public class BetterNpcView
 					fillAlpha = isTask ? config.taskFillColor().getAlpha() : npcInfo.getSwTrueTile().getFill().getAlpha();
 					antialias = isTask ? config.slayerAA() : config.swTrueTileAA();
 
-					lp = LocalPoint.fromWorld(client, npc.getWorldLocation());
+					lp = LocalPoint.fromWorld(npc.getWorldView(), npc.getWorldLocation());
 					if (lp != null)
 					{
 						tilePoly = Perspective.getCanvasTilePoly(client, lp);
@@ -463,16 +461,16 @@ public class BetterNpcView
 		}
 
 		final WorldPoint respawnLocation = npc.getPossibleRespawnLocations().get(0);
-		final LocalPoint lp = LocalPoint.fromWorld(client, respawnLocation.getX(), respawnLocation.getY());
+		final LocalPoint lp = LocalPoint.fromWorld(client.getTopLevelWorldView(), respawnLocation);
 
 		if (lp == null)
 		{
 			return;
 		}
 
-		final LocalPoint centerLp = new LocalPoint(
-				lp.getX() + Perspective.LOCAL_TILE_SIZE * (npc.getNpcSize() - 1) / 2,
-				lp.getY() + Perspective.LOCAL_TILE_SIZE * (npc.getNpcSize() - 1) / 2);
+		final LocalPoint centerLp = lp.plus(
+				Perspective.LOCAL_TILE_SIZE * (npc.getNpcSize() - 1) / 2,
+				Perspective.LOCAL_TILE_SIZE * (npc.getNpcSize() - 1) / 2);
 
 		Polygon tilePoly = Perspective.getCanvasTileAreaPoly(client, centerLp, npc.getNpcSize());
 		if (tilePoly != null && !tileInScene)

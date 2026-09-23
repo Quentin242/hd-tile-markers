@@ -90,7 +90,7 @@ public class BetterNpcEvents
 		if (npcInfo != null)
 		{
 			nameAndIdContainer.getNpcList().add(npcInfo);
-			if (!client.isInInstancedRegion())
+			if (!client.getTopLevelWorldView().isInstance())
 			{
 				respawnManager.onNpcSpawned(npc);
 			}

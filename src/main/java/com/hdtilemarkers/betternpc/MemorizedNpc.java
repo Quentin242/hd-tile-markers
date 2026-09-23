@@ -1,8 +1,8 @@
 /*
  * Adapted from Better NPC Highlight, https://github.com/riktenx/better-npc-highlight,
  * commit bf59bfb9a616897e9ffcd14d0d2b543e4c119b09. BSD 2-Clause License, see
- * META-INF/LICENSE-better-npc-highlight and THIRD_PARTY_NOTICES.md. Changes for Better
- * Indicator Renderer: package only.
+ * META-INF/LICENSE-better-npc-highlight and THIRD_PARTY_NOTICES.md. Changes for HD
+ * Tile Markers: package; unused npcName removed.
  */
 package com.hdtilemarkers.betternpc;
 
@@ -22,7 +22,6 @@ import net.runelite.api.coords.WorldPoint;
 @Getter
 public class MemorizedNpc {
 	private final int npcIndex;
-	private final String npcName;
 	private final int npcSize;
 
 	/**
@@ -46,7 +45,6 @@ public class MemorizedNpc {
 	private List<WorldPoint> possibleRespawnLocations;
 
 	public MemorizedNpc(NPC npc) {
-		this.npcName = npc.getName();
 		this.npcIndex = npc.getIndex();
 		this.possibleRespawnLocations = new ArrayList<>(2);
 		this.respawnTime = -1;

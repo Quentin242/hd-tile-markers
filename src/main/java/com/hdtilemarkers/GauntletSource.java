@@ -214,7 +214,7 @@ final class GauntletSource
     private void startRun()
     {
         remaining.clear();
-        int[] regions = client.getMapRegions();
+        int[] regions = client.getTopLevelWorldView().getMapRegions();
         int region = regions == null || regions.length == 0 ? -1 : regions[0];
         inRun = region == REGION_NORMAL || region == REGION_CORRUPTED;
         corrupted = region == REGION_CORRUPTED;

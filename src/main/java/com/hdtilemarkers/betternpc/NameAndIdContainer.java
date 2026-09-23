@@ -1,8 +1,8 @@
 /*
  * Adapted from Better NPC Highlight, https://github.com/riktenx/better-npc-highlight,
  * commit bf59bfb9a616897e9ffcd14d0d2b543e4c119b09. BSD 2-Clause License, see
- * META-INF/LICENSE-better-npc-highlight and THIRD_PARTY_NOTICES.md. Changes for Better
- * Indicator Renderer: package; entity hider, draw-beneath and menu-tag state removed.
+ * META-INF/LICENSE-better-npc-highlight and THIRD_PARTY_NOTICES.md. Changes for HD
+ * Tile Markers: package; entity hider, draw-beneath and menu-tag state removed.
  */
 package com.hdtilemarkers.betternpc;
 

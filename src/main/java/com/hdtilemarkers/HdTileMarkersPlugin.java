@@ -163,8 +163,9 @@ public class HdTileMarkersPlugin extends Plugin
             sources.groundEnabled = plugins.isPluginEnabled(groundPlugin);
             sources.objectsEnabled = plugins.isPluginEnabled(objectPlugin);
             sources.npcsEnabled = plugins.isPluginEnabled(npcPlugin);
-            List<Marker> tiles = sources.collect(pathTiles());
-            List<ModelTarget> models = sources.modelTargets();
+            // The integrations below add to these lists.
+            List<Marker> tiles = new ArrayList<>(sources.collect(pathTiles()));
+            List<ModelTarget> models = new ArrayList<>(sources.modelTargets());
             // Replace the original overlays unless the scene route has actually failed. Without GPU
             // HD Tile Markers draws 2D itself; merely not having drawn a frame yet (start-up) is not a failure.
             boolean drawing = !client.isGpu() || sceneActive();
@@ -172,50 +173,39 @@ public class HdTileMarkersPlugin extends Plugin
             heldBetterNpc.update(sceneActive(), o -> true);
             if (heldBetterNpc.drawing())
             {
-                tiles = new java.util.ArrayList<>(tiles);
-                models = new java.util.ArrayList<>(models);
                 betterNpc.collect(tiles, models);
             }
             // Stealing Artefacts: the same rule, only while its plugin runs and the scene route works.
             heldStealing.update(sceneActive(), o -> true);
             if (heldStealing.drawing())
             {
-                models = new java.util.ArrayList<>(models);
                 stealingArtefacts.collect(models);
             }
             // Sailing: its sea overlays; the ones on the boat itself stay its own.
             heldSailing.update(sceneActive(), o -> sailingStillShown(o.getClass().getSimpleName()));
             if (heldSailing.drawing())
             {
-                tiles = new java.util.ArrayList<>(tiles);
                 sailing.collect(tiles);
             }
             // NPC Aggression Timer's area lines; its timer infobox stays its own.
             heldAggroArea.update(sceneActive(), o -> true);
             if (heldAggroArea.drawing())
             {
-                tiles = new java.util.ArrayList<>(tiles);
                 aggroArea.collect(tiles);
             }
             // The Gauntlet's maze resources and utilities; its NPC highlights and counters stay its own.
             heldGauntlet.update(sceneActive(), o -> true);
             if (heldGauntlet.drawing())
             {
-                tiles = new java.util.ArrayList<>(tiles);
-                models = new java.util.ArrayList<>(models);
                 gauntlet.collect(tiles, models);
             }
             // Agility: obstacle and shortcut clickboxes, traps, marks of grace; its lap counter stays its own.
             heldAgility.update(sceneActive(), o -> true);
             if (heldAgility.drawing())
             {
-                tiles = new java.util.ArrayList<>(tiles);
-                models = new java.util.ArrayList<>(models);
                 agility.collect(tiles, models);
             }
             // Marks other plugins sent through PluginMessage.
-            tiles = new java.util.ArrayList<>(tiles);
-            models = new java.util.ArrayList<>(models);
             externalMarks.collect(tiles, models);
             markers = tiles;
             modelTargets = models;
@@ -251,10 +241,8 @@ public class HdTileMarkersPlugin extends Plugin
             boolean hdShadows = hdActive() && !"false".equals(configManager.getConfiguration("hd", "shadowsEnabled"));
             boolean transparentShadows = !"false".equals(configManager.getConfiguration("hd", "enableShadowTransparency"));
             // With its shadow transparency on every visible face casts (threshold 0.01): nothing to gain there.
-            boolean stacked = hdShadows && !transparentShadows;
-            renderer.floatingAlphaCap = stacked ? SceneShapeRenderer.HD_CAP_OPAQUE_SHADOWS : 255;
-            // One copy only: stacked copies at almost the same depth flickered against each other in 117 HD.
-            renderer.maxStack = 1;
+            boolean capped = hdShadows && !transparentShadows;
+            renderer.floatingAlphaCap = capped ? SceneShapeRenderer.HD_CAP_OPAQUE_SHADOWS : 255;
             if (hdShadows && transparentShadows) { warnShadowTransparency(); }
             renderer.begin(camera, 1f / stretchScale(), xray, player.getWorldView().getPlane());
             int drawn = 0;
@@ -366,7 +354,7 @@ public class HdTileMarkersPlugin extends Plugin
         if (target == null || !gameWorld || display == HdTileMarkersConfig.PathDisplaySetting.NEVER
             || (display != HdTileMarkersConfig.PathDisplaySetting.ALWAYS && !pathMarker.isKeyDisplayActivePath())
             || (pathMarker.isPathActive() && !MarkerSources.outside(player.getWorldView(), target))) { return tiles; }
-        List<PathMarker.SceneTile> result = new java.util.ArrayList<>(tiles);
+        List<PathMarker.SceneTile> result = new ArrayList<>(tiles);
         if (config.activePathDrawMode() == HdTileMarkersConfig.DrawMode.TARGET_TILE)
         {
             result.add(new PathMarker.SceneTile(target, config.activePathStroke1(), config.activePathFill1(),

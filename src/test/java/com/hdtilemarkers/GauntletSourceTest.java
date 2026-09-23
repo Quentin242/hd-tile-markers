@@ -30,7 +30,9 @@ public class GauntletSourceTest
 
     private void startRun(int region)
     {
-        when(client.getMapRegions()).thenReturn(new int[]{region});
+        net.runelite.api.WorldView wv = mock(net.runelite.api.WorldView.class);
+        when(wv.getMapRegions()).thenReturn(new int[]{region});
+        when(client.getTopLevelWorldView()).thenReturn(wv);
         WidgetLoaded loaded = new WidgetLoaded();
         loaded.setGroupId(637);
         source.onWidgetLoaded(loaded);

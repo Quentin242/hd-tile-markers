@@ -1,8 +1,8 @@
 /*
  * Adapted from Better NPC Highlight, https://github.com/riktenx/better-npc-highlight,
  * commit bf59bfb9a616897e9ffcd14d0d2b543e4c119b09. BSD 2-Clause License, see
- * META-INF/LICENSE-better-npc-highlight and THIRD_PARTY_NOTICES.md. Changes for Better
- * Indicator Renderer: package; config-writing methods (menu tagging) removed, Slayer plugin is not enabled.
+ * META-INF/LICENSE-better-npc-highlight and THIRD_PARTY_NOTICES.md. Changes for HD
+ * Tile Markers: package; config-writing methods (menu tagging) removed, Slayer plugin is not enabled.
  */
 package com.hdtilemarkers.betternpc;
 

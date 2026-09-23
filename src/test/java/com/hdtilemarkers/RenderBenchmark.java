@@ -290,10 +290,6 @@ public class RenderBenchmark
         System.out.printf("BENCH 100 tiles, in the scene:        %.3f ms/frame%n", frameMillis(new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace()), tiles(100), noModels, null));
         System.out.printf("BENCH 100 tiles, through walls:       %.3f ms/frame%n", frameMillis(new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace()), tiles(100), noModels, player));
         System.out.printf("BENCH 500 tiles, through walls:       %.3f ms/frame%n", frameMillis(new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace()), tiles(500), noModels, player));
-        SceneShapeRenderer stacked = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
-        stacked.floatingAlphaCap = SceneShapeRenderer.HD_CAP_OPAQUE_SHADOWS;
-        stacked.maxStack = SceneShapeRenderer.HD_STACK_OPAQUE_SHADOWS;
-        System.out.printf("BENCH 500 tiles, through walls, HD stacked: %.3f ms/frame%n", frameMillis(stacked, tiles(500), noModels, player));
         System.out.printf("BENCH 10 NPC hulls (2k faces each):   %.3f ms/frame%n", frameMillis(new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace()), none, hulls, player));
         System.out.printf("BENCH 10 NPC outlines (2k faces each):%.3f ms/frame%n", frameMillis(new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace()), none, outlines, player));
         List<ModelTarget> manyOutlines = new ArrayList<>();

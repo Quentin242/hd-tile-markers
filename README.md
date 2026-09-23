@@ -10,4 +10,4 @@ Uses your existing Ground Markers, Object Markers and NPC Indicators settings. A
 
 **With 117 HD, turn off its "Shadow transparency" setting.** Otherwise marks drawn through walls cast shadows that move with the camera; 117 HD gives plugins no way to prevent that. See [the guide](docs/GUIDE.md).
 
-[Features and setup](docs/GUIDE.md) · [Development](docs/GUIDE.md#development) · [Review notes](PUBLICATION-REVIEW.md) · [Credits](THIRD_PARTY_NOTICES.md) · [License](LICENSE)
+[Features and setup](docs/GUIDE.md) · [Development](docs/GUIDE.md#development) · [Credits](THIRD_PARTY_NOTICES.md) · [License](LICENSE)

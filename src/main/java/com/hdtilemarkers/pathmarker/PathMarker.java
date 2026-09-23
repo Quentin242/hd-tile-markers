@@ -22,7 +22,6 @@ import net.runelite.api.Scene;
 import net.runelite.api.Tile;
 import net.runelite.api.TileItem;
 import net.runelite.api.TileObject;
-import net.runelite.api.Varbits;
 import net.runelite.api.WallObject;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldArea;
@@ -32,7 +31,8 @@ import net.runelite.api.events.GameStateChanged;
 import net.runelite.api.events.GameTick;
 import net.runelite.api.events.MenuOptionClicked;
 import net.runelite.api.events.VarbitChanged;
-import net.runelite.api.widgets.ComponentID;
+import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.input.KeyManager;
@@ -212,7 +212,7 @@ public class PathMarker
         {
             return null;
         }
-        MenuEntry[] menuEntries = client.getMenuEntries();
+        MenuEntry[] menuEntries = client.getMenu().getMenuEntries();
         if (menuEntries.length == 0)
         {
             hoverPathId = 0;
@@ -224,7 +224,7 @@ public class PathMarker
             int i = 1;
             menuEntry = menuEntries[menuEntries.length - 1];
             MenuAction type = menuEntry.getType();
-            while (type == MenuAction.EXAMINE_ITEM_GROUND
+            while (i < menuEntries.length && (type == MenuAction.EXAMINE_ITEM_GROUND
                     || type == MenuAction.EXAMINE_NPC
                     || type == MenuAction.EXAMINE_OBJECT
                     || type == MenuAction.RUNELITE
@@ -232,7 +232,7 @@ public class PathMarker
                     || type == MenuAction.RUNELITE_INFOBOX
                     || type == MenuAction.RUNELITE_OVERLAY
                     || type == MenuAction.RUNELITE_PLAYER
-                    || type == MenuAction.RUNELITE_OVERLAY_CONFIG)
+                    || type == MenuAction.RUNELITE_OVERLAY_CONFIG))
             {
                 // For some reason, RuneLite considers the "Examine" options to be the first menuEntryOptions when no right-click menu is open.
                 // It's impossible to have "Examine" as left-click option, a far as I'm aware.
@@ -872,7 +872,7 @@ public class PathMarker
         {
             return null;
         }
-        if (client.getMenuEntries().length != 1 || lastMouseCanvasPosition == null)
+        if (client.getMenu().getMenuEntries().length != 1 || lastMouseCanvasPosition == null)
         {
             // Minimap hovering doesn't add menu entries other than the default "cancel"
             return null;
@@ -880,18 +880,18 @@ public class PathMarker
         Widget minimapDrawWidget;
         if (client.isResized())
         {
-            if (client.getVarbitValue(Varbits.SIDE_PANELS) == 1)
+            if (client.getVarbitValue(VarbitID.RESIZABLE_STONE_ARRANGEMENT) == 1)
             {
-                minimapDrawWidget = client.getWidget(ComponentID.RESIZABLE_VIEWPORT_BOTTOM_LINE_MINIMAP_DRAW_AREA);
+                minimapDrawWidget = client.getWidget(InterfaceID.ToplevelPreEoc.MINIMAP);
             }
             else
             {
-                minimapDrawWidget = client.getWidget(ComponentID.RESIZABLE_VIEWPORT_MINIMAP_DRAW_AREA);
+                minimapDrawWidget = client.getWidget(InterfaceID.ToplevelOsrsStretch.MINIMAP);
             }
         }
         else
         {
-            minimapDrawWidget = client.getWidget(ComponentID.FIXED_VIEWPORT_MINIMAP_DRAW_AREA);
+            minimapDrawWidget = client.getWidget(InterfaceID.Toplevel.MINIMAP);
         }
 
         if (minimapDrawWidget == null || minimapDrawWidget.isHidden())
@@ -1158,7 +1158,7 @@ public class PathMarker
             }
         }
         Tile selectedSceneTile = client.getLocalPlayer().getWorldView().getSelectedSceneTile();
-        MenuEntry[] menuEntries = client.getMenuEntries();
+        MenuEntry[] menuEntries = client.getMenu().getMenuEntries();
         if (menuEntries.length == 1 && !client.isMenuOpen()
             && (leftClicked || (config.hoverPathDisplaySetting() != HdTileMarkersConfig.PathDisplaySetting.NEVER)))
         {
@@ -1233,9 +1233,9 @@ public class PathMarker
 
     private MenuEntry hoveredMenuEntry(final MenuEntry[] menuEntries)
     {
-        final int menuX = client.getMenuX();
-        final int menuY = client.getMenuY();
-        final int menuWidth = client.getMenuWidth();
+        final int menuX = client.getMenu().getMenuX();
+        final int menuY = client.getMenu().getMenuY();
+        final int menuWidth = client.getMenu().getMenuWidth();
         final Point mousePosition = client.getMouseCanvasPosition();
 
         int dy = mousePosition.getY() - menuY;

@@ -101,7 +101,7 @@ public class SceneShapeRendererTest
     {
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
         Marker m = new Marker("t", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, new Color(0, 0, 0, 50), 2, null, true);
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         assertTrue(renderer.tile(m));
         assertTrue(renderer.end());
         ArgumentCaptor<RuneLiteObjectController> registered = ArgumentCaptor.forClass(RuneLiteObjectController.class);
@@ -144,7 +144,7 @@ public class SceneShapeRendererTest
         // A diamond: the square rotated by 45 degrees.
         m.quadX = new int[]{1344, 1500, 1344, 1188};
         m.quadY = new int[]{1188, 1344, 1500, 1344};
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         assertTrue(renderer.tile(m));
         assertTrue(renderer.end());
         ArgumentCaptor<RuneLiteObjectController> registered = ArgumentCaptor.forClass(RuneLiteObjectController.class);
@@ -163,29 +163,10 @@ public class SceneShapeRendererTest
         assertTrue("a vertex lies at the east corner of the diamond", found);
     }
 
-    @Test public void stackedCopiesLookAsOpaqueButEachStaysUnderHdsShadowThreshold()
-    {
-        for (int[] rule : new int[][]{{SceneShapeRenderer.HD_CAP_OPAQUE_SHADOWS, SceneShapeRenderer.HD_STACK_OPAQUE_SHADOWS}})
-        {
-            for (int alpha = 1; alpha <= 255; alpha++)
-            {
-                int[] st = SceneShapeRenderer.stack(alpha, rule[0], rule[1]);
-                assertTrue(st[1] <= rule[0] && st[0] <= rule[1]);
-                double seen = 1 - Math.pow(1 - st[1] / 255.0, st[0]);
-                // As opaque as asked, or as close as the copies allow.
-                assertTrue(alpha + " -> " + seen, seen >= alpha / 255.0 - 1e-9 || st[0] == rule[1] && st[1] == rule[0]);
-            }
-        }
-        // Shadow transparency off: an opaque border is two copies of 180 (91 % to the eye), each under 0.71.
-        assertArrayEquals(new int[]{2, 180}, SceneShapeRenderer.stack(255, 180, 2));
-        assertTrue(180 / 255.0 <= 0.71);
-    }
-
-    @Test public void floatingOpaqueBordersAreStackedUnderHd()
+    @Test public void floatingOpaqueBordersStayUnderHdsShadowThreshold()
     {
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
         renderer.floatingAlphaCap = SceneShapeRenderer.HD_CAP_OPAQUE_SHADOWS;
-        renderer.maxStack = SceneShapeRenderer.HD_STACK_OPAQUE_SHADOWS;
         renderer.begin(CAMERA, 1, new LocalPoint(1344, 1344, -1), 0);
         assertTrue(renderer.tile(new Marker("t", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, Marker.NO_FILL, 2, null, false)));
         assertTrue(renderer.end());
@@ -194,10 +175,10 @@ public class SceneShapeRendererTest
         {
             if (alphaCarrier.getFaceColors3()[f] == -2) { continue; }
             borders++;
-            // Transparency byte 255 - alpha: every copy at most 180 opaque.
+            // Transparency byte 255 - alpha: at most 180 opaque.
             assertTrue(255 - (alphaCarrier.getFaceTransparencies()[f] & 0xff) <= 180);
         }
-        assertEquals(8 * 2, borders);
+        assertEquals(8, borders);
     }
 
     @Test public void normalsPointUpFromEveryCameraAngle()
@@ -207,7 +188,7 @@ public class SceneShapeRendererTest
         ModelShapes.Camera turned = new ModelShapes.Camera(1344 + 1800, 1344, -1200, 0.8f, (float) (Math.PI / 2), 600, 0, 0, 1000, 700);
         for (ModelShapes.Camera camera : new ModelShapes.Camera[]{CAMERA, turned})
         {
-            renderer.begin(camera, 1);
+            renderer.begin(camera, 1, null, 0);
             assertTrue(renderer.tile(m));
             assertTrue(renderer.end());
             // Lighting renderers shade by the normal: straight up (model y is down), whatever the camera.
@@ -223,7 +204,7 @@ public class SceneShapeRendererTest
         Marker m = new Marker("aggro:0", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.YELLOW, Marker.NO_FILL, 1, null, false);
         m.lineX = new int[]{1280, 1408, 1536};
         m.lineY = new int[]{1280, 1280, 1280};
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         assertTrue(renderer.tile(m));
         assertTrue(renderer.end());
         verify(client).registerRuneLiteObject(any(RuneLiteObjectController.class));
@@ -232,7 +213,7 @@ public class SceneShapeRendererTest
     @Test public void geometryStaysInsideTheCarrierBounds()
     {
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         // A 5x5 footprint needs more than the minimum radius.
         assertTrue(renderer.tile(new Marker("big", new LocalPoint(1344, 1344, -1), 0, 5, 5, Color.RED, null, 2, null, false)));
         assertTrue(renderer.end());
@@ -253,7 +234,7 @@ public class SceneShapeRendererTest
     @Test public void shapesOnOneTileShareOneSceneObject()
     {
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         // Two markers on tile (10, 10) and one on (12, 10).
         renderer.tile(new Marker("a", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, null, 2, null, false));
         renderer.tile(new Marker("b", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.BLUE, null, 1, null, false));
@@ -275,7 +256,7 @@ public class SceneShapeRendererTest
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
         Marker m = new Marker("c", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, new Color(0, 0, 0, 50), 2, null, false);
         m.cornerDivisor = 5;
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         assertTrue(renderer.tile(m));
         assertTrue(renderer.end());
         // Fill: a centre fan of 4 faces. Corners: 4 L-strips of 4 faces each. Then hidden faces.
@@ -310,7 +291,7 @@ public class SceneShapeRendererTest
         java.awt.Polygon clickbox = new java.awt.Polygon(new int[]{400, 520, 520, 460, 460, 400}, new int[]{200, 200, 260, 260, 330, 330}, 6);
         ModelTarget target = ModelTarget.object("object:1:clickbox", object, data, 0, 0, Color.YELLOW, new Color(255, 255, 0, 20), 2, true, () -> clickbox);
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         assertTrue(renderer.model(target));
         assertTrue(renderer.end());
         assertTrue(renderer.drawn("object:1:clickbox"));
@@ -434,7 +415,7 @@ public class SceneShapeRendererTest
     @Test public void withoutThroughWallsHullsStayOnTheirOwnTile()
     {
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         assertTrue(renderer.model(ModelTarget.npc("npc:hull", npc(triangle(), 1472), Color.BLUE, Marker.NO_FILL, 2)));
         assertTrue(renderer.end());
         ArgumentCaptor<RuneLiteObjectController> registered = ArgumentCaptor.forClass(RuneLiteObjectController.class);
@@ -474,7 +455,7 @@ public class SceneShapeRendererTest
     {
         settings[1][10][10] = Terrain.BRIDGE;
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         assertTrue(renderer.tile(new Marker("t", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, null, 2, null, false)));
         assertTrue(renderer.end());
         ArgumentCaptor<RuneLiteObjectController> registered = ArgumentCaptor.forClass(RuneLiteObjectController.class);
@@ -486,12 +467,12 @@ public class SceneShapeRendererTest
     {
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
         Marker m = new Marker("t", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, null, 2, null, false);
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         renderer.tile(m);
         renderer.end();
         assertTrue(renderer.drawn("t"));
         when(client.isRuneLiteObjectRegistered(any())).thenReturn(true);
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         renderer.end();
         verify(client).removeRuneLiteObject(any(RuneLiteObjectController.class));
         assertFalse(renderer.drawn("t"));
@@ -501,7 +482,7 @@ public class SceneShapeRendererTest
     {
         when(client.loadModelData(anyInt())).thenReturn(null);
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         renderer.tile(new Marker("t", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, null, 2, null, false));
         assertFalse(renderer.end());
         assertFalse(renderer.drawn("t"));
@@ -515,12 +496,12 @@ public class SceneShapeRendererTest
         doAnswer(call -> { registered.add(call.getArgument(0)); return null; }).when(client).registerRuneLiteObject(any());
         doAnswer(call -> { registered.remove(call.getArgument(0)); return null; }).when(client).removeRuneLiteObject(any());
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         renderer.tile(new Marker("moving", new LocalPoint(1344, 1344, -1), 0, 1, 1,
             Color.RED, new Color(0, 0, 0, 50), 2, null, false));
         assertTrue(renderer.end());
         assertEquals(1, renderer.carriersCreated());
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         renderer.tile(new Marker("moving", new LocalPoint(1472, 1344, -1), 0, 1, 1,
             Color.BLUE, Marker.NO_FILL, 2, null, false));
         assertTrue(renderer.end());
@@ -529,7 +510,7 @@ public class SceneShapeRendererTest
         for (int f = 8; f < 12; f++) { assertEquals(-2, alphaCarrier.getFaceColors3()[f]); }
         verify(client).removeRuneLiteObject(any(RuneLiteObjectController.class));
         renderer.clear();
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         renderer.tile(new Marker("moving", new LocalPoint(1472, 1344, -1), 0, 1, 1,
             Color.BLUE, Marker.NO_FILL, 2, null, false));
         assertTrue(renderer.end());
@@ -541,7 +522,7 @@ public class SceneShapeRendererTest
         Model mesh = triangle();
         NPC first = npc(mesh, 1344), second = npc(mesh, 1472);
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         assertTrue(renderer.model(ModelTarget.npc("first:hull", first, Color.RED, Marker.NO_FILL, 2)));
         assertTrue(renderer.model(ModelTarget.npc("second:hull", second, Color.BLUE, Marker.NO_FILL, 2)));
         // Simulate a client model buffer being overwritten after its first projection.
@@ -550,7 +531,7 @@ public class SceneShapeRendererTest
         assertTrue(renderer.model(ModelTarget.npcOutline("first:outline", first, Color.RED, 2)));
         verify(first, times(1)).getModel();
         verify(second, times(1)).getModel();
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         assertFalse(renderer.model(ModelTarget.npcOutline("first:outline", first, Color.RED, 2)));
         verify(first, times(2)).getModel();
         assertTrue("offscreen shapes suppress the expensive 2D fallback", renderer.drawn("first:outline"));
@@ -566,14 +547,14 @@ public class SceneShapeRendererTest
         ModelTarget target = ModelTarget.objectOutline("tree:outline", object, mesh, 0, 0, Color.RED, 2);
         for (int i = 0; i < 3; i++)
         {
-            renderer.begin(CAMERA, 1);
+            renderer.begin(CAMERA, 1, null, 0);
             assertTrue(renderer.model(target));
             assertTrue(renderer.end());
         }
         // Projected and traced once for three frames with the same camera.
         verify(mesh, times(1)).getFaceIndices1();
         ModelShapes.Camera moved = new ModelShapes.Camera(1344 + 40, 1344 - 2000, -1500, 0.6f, 0, 600, 0, 0, 1000, 700);
-        renderer.begin(moved, 1);
+        renderer.begin(moved, 1, null, 0);
         assertTrue(renderer.model(target));
         assertTrue(renderer.end());
         verify(mesh, times(2)).getFaceIndices1();
@@ -585,7 +566,7 @@ public class SceneShapeRendererTest
         java.util.Arrays.fill(mesh.getVerticesX(), 1000000);
         NPC npc = npc(mesh, 1344);
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         assertFalse(renderer.model(ModelTarget.npcOutline("outside", npc, Color.RED, 2)));
         assertTrue(renderer.drawn("outside"));
         verify(mesh, never()).getFaceIndices1();
@@ -597,7 +578,7 @@ public class SceneShapeRendererTest
     @Test public void childWorldMarkersRemainEligibleForFallback()
     {
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         Marker marker = new Marker("child:tile", new LocalPoint(1344, 1344, 7), 0, 1, 1,
             Color.CYAN, Marker.NO_FILL, 2, null, false);
         assertFalse(renderer.tile(marker));
@@ -612,7 +593,7 @@ public class SceneShapeRendererTest
     @Test public void transparentTilesAreHandledWithoutFallbackOrSceneObjects()
     {
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
-        renderer.begin(CAMERA, 1);
+        renderer.begin(CAMERA, 1, null, 0);
         Marker marker = new Marker("invisible", new LocalPoint(1344, 1344, -1), 0, 1, 1,
             Marker.NO_FILL, Marker.NO_FILL, 2, null, false);
         assertFalse(renderer.tile(marker));

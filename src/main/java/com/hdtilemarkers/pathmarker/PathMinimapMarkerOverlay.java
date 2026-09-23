@@ -10,10 +10,10 @@ import com.hdtilemarkers.HdTileMarkersConfig;
 
 import net.runelite.api.Client;
 import net.runelite.api.Point;
-import net.runelite.api.Varbits;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
-import net.runelite.api.widgets.ComponentID;
+import net.runelite.api.gameval.InterfaceID;
+import net.runelite.api.gameval.VarbitID;
 import net.runelite.api.widgets.Widget;
 import net.runelite.client.ui.overlay.Overlay;
 import net.runelite.client.ui.overlay.OverlayLayer;
@@ -48,18 +48,18 @@ public class PathMinimapMarkerOverlay extends Overlay
         Widget minimapDrawWidget;
         if (client.isResized())
         {
-            if (client.getVarbitValue(Varbits.SIDE_PANELS) == 1)
+            if (client.getVarbitValue(VarbitID.RESIZABLE_STONE_ARRANGEMENT) == 1)
             {
-                minimapDrawWidget = client.getWidget(ComponentID.RESIZABLE_VIEWPORT_BOTTOM_LINE_MINIMAP_DRAW_AREA);
+                minimapDrawWidget = client.getWidget(InterfaceID.ToplevelPreEoc.MINIMAP);
             }
             else
             {
-                minimapDrawWidget = client.getWidget(ComponentID.RESIZABLE_VIEWPORT_MINIMAP_DRAW_AREA);
+                minimapDrawWidget = client.getWidget(InterfaceID.ToplevelOsrsStretch.MINIMAP);
             }
         }
         else
         {
-            minimapDrawWidget = client.getWidget(ComponentID.FIXED_VIEWPORT_MINIMAP_DRAW_AREA);
+            minimapDrawWidget = client.getWidget(InterfaceID.Toplevel.MINIMAP);
         }
         if (minimapDrawWidget == null || minimapDrawWidget.isHidden())
         {

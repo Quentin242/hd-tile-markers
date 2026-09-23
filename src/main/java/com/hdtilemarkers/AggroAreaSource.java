@@ -1,8 +1,8 @@
 /*
  * Display rules adapted from RuneLite's NPC Aggression Timer (NpcAggroAreaOverlay.render and renderPath,
  * https://github.com/runelite/runelite, tag runelite-parent-1.12.39), copyright (c) 2018 Woox,
- * BSD 2-Clause License; see META-INF/LICENSE-runelite and THIRD_PARTY_NOTICES.md. Changes for Better
- * Indicator Renderer: the plugin's own area lines are read through its public getters and returned
+ * BSD 2-Clause License; see META-INF/LICENSE-runelite and THIRD_PARTY_NOTICES.md. Changes for HD
+ * Tile Markers: the plugin's own area lines are read through its public getters and returned
  * as scene lines instead of drawn.
  */
 package com.hdtilemarkers;

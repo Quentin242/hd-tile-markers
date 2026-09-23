@@ -17,6 +17,8 @@ final class CarrierModels
 {
     private final Client client;
     private ModelData seed;
+    /** The seed could not be loaded: not tried again every frame, only after reset(). */
+    private boolean seedFailed;
 
     @Inject
     CarrierModels(Client client) { this.client = client; }
@@ -29,11 +31,13 @@ final class CarrierModels
 
     private boolean seeded()
     {
-        if (seed == null)
+        if (seed == null && !seedFailed)
         {
             seed = client.loadModelData(client.getItemDefinition(ItemID.BRONZE_DAGGER).getInventoryModel());
+            seedFailed = seed == null || seed.getVerticesCount() <= 0 || seed.getFaceCount() <= 0;
+            if (seedFailed) { seed = null; }
         }
-        return seed != null && seed.getVerticesCount() > 0 && seed.getFaceCount() > 0;
+        return seed != null;
     }
 
     private int copies(int vertices, int faces)
@@ -101,5 +105,5 @@ final class CarrierModels
         return model.getRadius() >= radius ? model : null;
     }
 
-    void reset() { seed = null; }
+    void reset() { seed = null; seedFailed = false; }
 }
