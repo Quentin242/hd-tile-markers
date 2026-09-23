@@ -34,19 +34,32 @@ final class SceneShapeRenderer
     private final RenderTrace trace;
     private final Map<Long, Bucket> buckets = new HashMap<>();
     private final Set<String> appended = new HashSet<>();
-    private final Map<NPC, Projection> projections = new IdentityHashMap<>();
+    /**
+     * Projections per NPC or object renderable, kept across frames so their arrays are reused.
+     * Styles of one NPC share its projection within a frame; static object models keep theirs,
+     * silhouette included, while the camera and the object stay where they were.
+     */
+    private final Map<Object, Projection> projections = new IdentityHashMap<>();
+    private int frame;
+    /** New outline traces per frame are limited to this much time; the rest are drawn as hulls. */
+    private static final long OUTLINE_BUDGET_NANOS = 2_500_000;
+    private long outlineNanos;
     private final java.util.Deque<Bucket> spareCarriers = new ArrayDeque<>();
     private static final int MAX_SPARES = 64;
 
     /** Frame-local owned data: actor mesh arrays can be overwritten by another getModel(). */
     private static final class Projection
     {
-        float[] x, y, hull;
-        int[] a, b, c;
+        float[] x = new float[0], y = new float[0], hull;
+        int[] a = new int[0], b = new int[0], c = new int[0];
         boolean[] hidden;
+        /** Number of faces copied this frame; 0 until an outline needs them. */
+        int faces, n;
         float depth;
         boolean outside;
         List<float[]> loops;
+        int frame, facesFrame, localX, localY, height, orientation;
+        ModelShapes.Camera camera;
     }
     private final Silhouette.Scratch silhouetteScratch = new Silhouette.Scratch();
     private final ScreenOutline outline = new ScreenOutline();
@@ -54,13 +67,35 @@ final class SceneShapeRenderer
     private float[] px = new float[64], py = new float[64], pd = new float[64];
     private ModelShapes.Camera camera;
     private float normalX, normalY, normalZ, pixel = 1;
+    /**
+     * 117 HD casts a shadow from each face more opaque than its threshold (0.71, or 0.01 with its
+     * "shadow transparency"), and floating through-walls marks move with the camera, so their shadows
+     * shimmer over the ground. A face above floatingAlphaCap is drawn as up to maxStack stacked copies,
+     * each at most floatingAlphaCap: together as opaque to the eye, each copy under the threshold.
+     */
+    int floatingAlphaCap = 255, maxStack = 1;
+    /** Shadow transparency off: per copy just under 0.71, two copies reach 91 %. */
+    static final int HD_CAP_OPAQUE_SHADOWS = 180, HD_STACK_OPAQUE_SHADOWS = 2;
+
+    /** Copies needed for alpha under the cap, and the alpha per copy: 1 - (1 - a)^(1/n) <= cap. */
+    static int[] stack(int alpha, int cap, int max)
+    {
+        if (alpha <= cap || max <= 1) { return new int[]{1, Math.min(alpha, cap)}; }
+        double a = alpha / 255.0;
+        for (int n = 2; n <= max; n++)
+        {
+            int per = (int) Math.ceil((1 - Math.pow(1 - a, 1.0 / n)) * 255);
+            if (per <= cap) { return new int[]{n, per}; }
+        }
+        return new int[]{max, cap};
+    }
     private boolean unavailable;
     private int carriersCreated;
     private int layer;
-    /** Through walls: shapes are pulled towards the camera, gathered on the player's tile where possible. */
-    private boolean xray;
+    /** Through walls: shapes are pulled towards the camera, gathered in one object where possible. */
+    private boolean xray, xrayCameraNear;
     private LocalPoint xrayAnchor;
-    private int xrayLevel;
+    private int xrayLevel, xrayHeight;
     private static final float XRAY_NEAR = 200, XRAY_SCALE = 0.03f;
     /*
      * The GPU plugin draws nothing of a see-through model whose diameter is 6000 or more
@@ -70,8 +105,13 @@ final class SceneShapeRenderer
      * from their object's anchor.
      */
     static final int MAX_RADIUS = 2000, XRAY_REACH = 1900;
-    /** Ground points of a shape sharing the player's through-walls object stay this close to its anchor. */
+    /** Ground points of a shape sharing the through-walls object stay this close to its anchor. */
     private static final int XRAY_SHARED = XRAY_REACH - 300;
+    /**
+     * With the camera this close (horizontally) to the through-walls anchor, the object hangs at the camera's
+     * height and every shape can share it: its points are pulled to at most a few hundred units from the camera.
+     */
+    private static final int XRAY_CAMERA = XRAY_REACH - 700;
     private float[] tx = new float[64], ty = new float[64], tz = new float[64];
     static final int HULL_LAYER = 12;
 
@@ -85,8 +125,8 @@ final class SceneShapeRenderer
     }
 
     /**
-     * Starts a frame. With xrayAnchor set (the player's tile), every shape is drawn
-     * through walls: each vertex moves along its view ray towards the camera, keeping
+     * Starts a frame. With xrayAnchor set (in the drawn zone nearest the camera), every shape
+     * is drawn through walls: each vertex moves along its view ray towards the camera, keeping
      * its screen position and its order relative to other shapes.
      */
     void begin(ModelShapes.Camera camera, float canvasPerPixel, LocalPoint xrayAnchor, int xrayLevel)
@@ -98,14 +138,25 @@ final class SceneShapeRenderer
         pixel = canvasPerPixel;
         trace.beginFrame();
         appended.clear();
-        projections.clear();
+        frame++;
+        outlineNanos = 0;
         unavailable = false;
         for (Bucket b : buckets.values()) { b.vertices = 0; b.faces = 0; }
-        // Normals point straight up (model y is down): lighting renderers such as 117 HD then shade
-        // every face like flat ground, the same from every camera angle.
+        // Normals point straight up (model y is down): 117 HD, which uses them because faces are not
+        // marked flat (see FlatModel.paint), then lights every mark like flat ground seen from above,
+        // the same from every camera angle.
         normalX = 0;
         normalY = -1;
         normalZ = 0;
+        if (xray)
+        {
+            // Renderers sort see-through models by the distance from their position to the camera, farthest
+            // first: at the camera's height the shared object comes after everything else in its zone.
+            float dx = camera.x - xrayAnchor.getX(), dy = camera.y - xrayAnchor.getY();
+            xrayCameraNear = dx * dx + dy * dy <= (float) XRAY_CAMERA * XRAY_CAMERA;
+            xrayHeight = xrayCameraNear ? Math.round(camera.z)
+                : Terrain.heightOnLevel(client.getTopLevelWorldView(), xrayAnchor.getX(), xrayAnchor.getY(), xrayLevel);
+        }
     }
 
     /** Draws a tile footprint; returns whether it is in the scene this frame. */
@@ -248,14 +299,17 @@ final class SceneShapeRenderer
         if (unavailable || location == null || location.getWorldView() != client.getTopLevelWorldView().getId())
         { return hide(t.key); }
         int height = t.height(client);
-        Projection projected = t.npc == null ? null : projections.get(t.npc);
-        if (projected == null)
+        Object id = t.npc != null ? t.npc : t.renderable;
+        if (id == null) { return hide(t.key); }
+        Projection projected = projections.get(id);
+        if (projected == null) { projected = new Projection(); projections.put(id, projected); }
+        if (projected.frame != frame && !unchanged(t, projected, location, height))
         {
             Mesh<?> mesh = t.mesh();
             if (mesh == null) { return hide(t.key); }
-            projected = project(t, mesh, location, height);
-            if (t.npc != null) { projections.put(t.npc, projected); }
+            project(t, mesh, projected, location, height);
         }
+        projected.frame = frame;
         float depth = projected.depth;
         if (Float.isNaN(depth)) { return hide(t.key); }
         if (projected.outside && !t.clickbox)
@@ -264,14 +318,21 @@ final class SceneShapeRenderer
             return culled(t.key);
         }
         float[] hull;
-        if (t.outline)
+        boolean asHull = false;
+        if (t.outline && projected.loops == null)
         {
-            if (projected.a.length == 0) { return hide(t.key); }
-            if (projected.loops == null)
+            // Over this frame's budget: a hull border instead of a new trace.
+            asHull = outlineNanos > OUTLINE_BUDGET_NANOS || !faces(t, projected);
+            if (!asHull)
             {
+                long start = System.nanoTime();
                 projected.loops = Silhouette.trace(projected.x, projected.y, projected.a, projected.b,
-                    projected.c, projected.a.length, projected.hidden, silhouetteScratch);
+                    projected.c, projected.faces, projected.hidden, silhouetteScratch);
+                outlineNanos += System.nanoTime() - start;
             }
+        }
+        if (t.outline && !asHull)
+        {
             List<float[]> loops = projected.loops;
             int level = Terrain.level(client.getTopLevelWorldView(), location.getSceneX(), location.getSceneY(), t.plane());
             boolean any = false;
@@ -309,14 +370,11 @@ final class SceneShapeRenderer
             }
             return any || hide(t.key);
         }
-        else
+        if (projected.hull == null)
         {
-            if (projected.hull == null)
-            {
-                projected.hull = ModelShapes.convexHull(projected.x, projected.y, projected.x.length);
-            }
-            hull = projected.hull;
+            projected.hull = ModelShapes.convexHull(projected.x, projected.y, projected.n);
         }
+        hull = projected.hull;
         if (hull == null || hull.length < 6) { return hide(t.key); }
         int h = hull.length / 2;
         float[] hx = new float[h], hy = new float[h], hd = new float[h];
@@ -327,14 +385,30 @@ final class SceneShapeRenderer
         { return hide(t.key); }
         if (offscreen()) { return culled(t.key); }
         int level = Terrain.level(client.getTopLevelWorldView(), location.getSceneX(), location.getSceneY(), t.plane());
-        return draw(t.key, location, level, height, t.color, t.fill, t.borderWidth > 0);
+        return draw(t.key, location, level, height, t.color, asHull ? Marker.NO_FILL : t.fill, t.borderWidth > 0);
     }
 
-    private Projection project(ModelTarget t, Mesh<?> mesh, LocalPoint location, int height)
+    /**
+     * A static object model (not an actor, not animated) whose camera, place and rotation are
+     * those of its last projection: its projection and silhouette still hold.
+     */
+    private boolean unchanged(ModelTarget t, Projection p, LocalPoint location, int height)
     {
-        Projection p = new Projection();
+        return t.npc == null && (t.renderable instanceof Model || t.renderable instanceof ModelData)
+            && p.camera != null && p.camera.same(camera) && p.localX == location.getX() && p.localY == location.getY()
+            && p.height == height && p.orientation == t.orientation() && p.frame == frame - 1;
+    }
+
+    private void project(ModelTarget t, Mesh<?> mesh, Projection p, LocalPoint location, int height)
+    {
         int n = mesh.getVerticesCount();
-        p.x = new float[n]; p.y = new float[n];
+        if (p.x.length < n) { p.x = new float[n]; p.y = new float[n]; }
+        p.n = n;
+        p.hull = null;
+        p.loops = null;
+        p.facesFrame = 0;
+        p.faces = 0;
+        p.camera = camera; p.localX = location.getX(); p.localY = location.getY(); p.height = height; p.orientation = t.orientation();
         p.depth = ModelShapes.projectModel(camera, mesh.getVerticesX(), mesh.getVerticesY(), mesh.getVerticesZ(),
             n, location.getX(), location.getY(), height, t.orientation(), p.x, p.y);
         float minX = Float.POSITIVE_INFINITY, minY = minX, maxX = Float.NEGATIVE_INFINITY, maxY = maxX;
@@ -348,22 +422,49 @@ final class SceneShapeRenderer
         int vx = client.getViewportXOffset(), vy = client.getViewportYOffset();
         p.outside = maxX + margin < vx || maxY + margin < vy
             || minX - margin > vx + client.getViewportWidth() || minY - margin > vy + client.getViewportHeight();
+        // Actor models live in a shared client buffer: copy their faces now, into reused arrays, in case
+        // another style of this NPC needs them after another actor's getModel(). Objects only for outlines.
+        if (t.outline || t.npc != null) { copyFaces(mesh, p); }
+    }
+
+    /**
+     * Face topology for outlines, copied once per projection. NPCs copy it when projected; a static
+     * object's hull projection gets it here when its outline follows.
+     */
+    private boolean faces(ModelTarget t, Projection p)
+    {
+        // Copied faces stay valid until the next projection; one copy attempt per frame otherwise.
+        if (p.faces > 0) { return true; }
+        if (p.facesFrame == frame) { return false; }
+        Mesh<?> mesh = t.mesh();
+        if (mesh == null || mesh.getVerticesCount() != p.n) { return false; }
+        copyFaces(mesh, p);
+        return p.faces > 0;
+    }
+
+    private void copyFaces(Mesh<?> mesh, Projection p)
+    {
+        p.facesFrame = frame;
+        p.faces = 0;
         int faces = mesh.getFaceCount();
-        // NPC styles share this snapshot; never retain the client's mutable model arrays.
-        if (!p.outside && !Float.isNaN(p.depth) && (t.npc != null || t.outline) && faces > 0)
+        if (p.outside || Float.isNaN(p.depth) || faces <= 0) { return; }
+        if (p.a.length < faces) { p.a = new int[faces]; p.b = new int[faces]; p.c = new int[faces]; }
+        System.arraycopy(mesh.getFaceIndices1(), 0, p.a, 0, faces);
+        System.arraycopy(mesh.getFaceIndices2(), 0, p.b, 0, faces);
+        System.arraycopy(mesh.getFaceIndices3(), 0, p.c, 0, faces);
+        for (int f = 0; f < faces; f++)
         {
-            p.a = Arrays.copyOf(mesh.getFaceIndices1(), faces);
-            p.b = Arrays.copyOf(mesh.getFaceIndices2(), faces);
-            p.c = Arrays.copyOf(mesh.getFaceIndices3(), faces);
-            if (mesh instanceof Model && ((Model) mesh).getFaceColors3() != null)
-            {
-                int[] colors = ((Model) mesh).getFaceColors3();
-                p.hidden = new boolean[faces];
-                for (int f = 0; f < faces && f < colors.length; f++) { p.hidden[f] = colors[f] == -2; }
-            }
+            // Topology that does not fit the projected vertices is not traced.
+            if (p.a[f] < 0 || p.b[f] < 0 || p.c[f] < 0 || p.a[f] >= p.n || p.b[f] >= p.n || p.c[f] >= p.n) { return; }
         }
-        else { p.a = new int[0]; }
-        return p;
+        int[] colors = mesh instanceof Model ? ((Model) mesh).getFaceColors3() : null;
+        if (colors == null) { p.hidden = null; }
+        else
+        {
+            if (p.hidden == null || p.hidden.length < faces) { p.hidden = new boolean[faces]; }
+            for (int f = 0; f < faces; f++) { p.hidden[f] = f < colors.length && colors[f] == -2; }
+        }
+        p.faces = faces;
     }
 
     /** Whether every point of the current shape lies within reach of the given anchor. */
@@ -402,11 +503,11 @@ final class SceneShapeRenderer
             tx[i] = point[0]; ty[i] = point[1]; tz[i] = point[2];
         }
         WorldView top = client.getTopLevelWorldView();
-        if (throughWalls && within(xrayAnchor.getX(), xrayAnchor.getY(),
-            Terrain.heightOnLevel(top, xrayAnchor.getX(), xrayAnchor.getY(), xrayLevel), XRAY_SHARED))
+        boolean shared = throughWalls && (xrayCameraNear || within(xrayAnchor.getX(), xrayAnchor.getY(), xrayHeight, XRAY_SHARED));
+        if (shared)
         {
-            // One object on the player's tile: a tile hidden behind a wall may not be drawn by the client.
-            // Shapes too far from it for one model get a through-walls object on their own tile.
+            // One object in the drawn zone nearest the camera: a tile hidden behind a wall may not be drawn
+            // by the client. Shapes too far from it for one model get a through-walls object on their own tile.
             anchor = xrayAnchor;
             level = xrayLevel;
         }
@@ -414,11 +515,18 @@ final class SceneShapeRenderer
         int tileX = Math.max(0, Math.min(top.getSizeX() - 1, anchor.getX() >> 7));
         int tileY = Math.max(0, Math.min(top.getSizeY() - 1, anchor.getY() >> 7));
         // A single shape too large for any scene object is left out.
-        if (!carriers.fits(outline.vertices, outline.faces)
-            || !within(tileX * 128 + 64, tileY * 128 + 64, Terrain.heightOnLevel(top, tileX * 128 + 64, tileY * 128 + 64, level),
+        int borderAlpha = hasBorder ? border.getAlpha() : 0, borderHsl = FlatModel.hsl(border), fillHsl = FlatModel.hsl(fill);
+        // Floating marks under 117 HD: opaque faces become stacked copies under its shadow threshold.
+        int cap = throughWalls ? floatingAlphaCap : 255, maxCopies = throughWalls ? maxStack : 1;
+        int[] borderStack = stack(borderAlpha, cap, maxCopies), fillStack = stack(fill.getAlpha(), cap, maxCopies);
+        int copies = Math.max(borderStack[0], fillStack[0]);
+        // Size checks include every copy: a bucket past the carrier limits fails the whole frame.
+        int addVertices = outline.vertices * copies, addFaces = outline.faces * copies;
+        if (!carriers.fits(addVertices, addFaces)
+            || !shared && !within(tileX * 128 + 64, tileY * 128 + 64, Terrain.heightOnLevel(top, tileX * 128 + 64, tileY * 128 + 64, level),
                 throughWalls ? XRAY_REACH - 200 : MAX_RADIUS - 300)) { return hide(key); }
         // Through-walls shapes get their own buckets: they are moved to the camera, others are not.
-        long base = ((long) level << 32) | ((long) tileX << 16) | tileY | (throughWalls ? 1L << 40 : 0);
+        long base = ((long) level << 32) | ((long) tileX << 16) | tileY | (throughWalls ? 1L << 40 : 0) | (shared ? 1L << 39 : 0);
         // A full bucket continues in another object on the same tile, so no model exceeds the renderer's limits.
         Bucket b = null;
         for (long part = 0; ; part++)
@@ -426,27 +534,32 @@ final class SceneShapeRenderer
             long id = base | (part << 41);
             b = buckets.get(id);
             if (b == null) { b = new Bucket(tileX, tileY, level, anchor.getWorldView()); buckets.put(id, b); break; }
-            if (carriers.fits(b.vertices + outline.vertices, b.faces + outline.faces)) { break; }
+            if (carriers.fits(b.vertices + addVertices, b.faces + addFaces)) { break; }
         }
-        int first = b.vertices;
-        b.ensure(first + outline.vertices, b.faces + outline.faces);
+        b.ensure(b.vertices + addVertices, b.faces + addFaces);
         b.xray = throughWalls;
-        for (int i = 0; i < outline.vertices; i++)
+        b.shared = shared;
+        for (int copy = 0; copy < copies; copy++)
         {
-            b.layer[first + i] = layer;
-            b.wx[first + i] = tx[i]; b.wy[first + i] = ty[i]; b.wz[first + i] = tz[i];
-        }
-        b.vertices += outline.vertices;
-        int borderAlpha = hasBorder ? border.getAlpha() : 0, borderHsl = FlatModel.hsl(border), fillHsl = FlatModel.hsl(fill);
-        for (int f = 0; f < outline.faces; f++)
-        {
-            boolean isBorder = f < outline.borderFaces;
-            int alpha = isBorder ? borderAlpha : fill.getAlpha();
-            if (alpha <= 0) { continue; }
-            int k = b.faces++;
-            b.fa[k] = first + outline.a[f]; b.fb[k] = first + outline.b[f]; b.fc[k] = first + outline.c[f];
-            b.color[k] = isBorder ? borderHsl : fillHsl;
-            b.alpha[k] = alpha;
+            int first = b.vertices;
+            for (int i = 0; i < outline.vertices; i++)
+            {
+                b.layer[first + i] = layer;
+                b.copy[first + i] = copy;
+                b.wx[first + i] = tx[i]; b.wy[first + i] = ty[i]; b.wz[first + i] = tz[i];
+            }
+            b.vertices += outline.vertices;
+            for (int f = 0; f < outline.faces; f++)
+            {
+                boolean isBorder = f < outline.borderFaces;
+                int[] st = isBorder ? borderStack : fillStack;
+                int alpha = isBorder ? borderAlpha : fill.getAlpha();
+                if (alpha <= 0 || copy >= st[0]) { continue; }
+                int k = b.faces++;
+                b.fa[k] = first + outline.a[f]; b.fb[k] = first + outline.b[f]; b.fc[k] = first + outline.c[f];
+                b.color[k] = isBorder ? borderHsl : fillHsl;
+                b.alpha[k] = st[1];
+            }
         }
         appended.add(key);
         return true;
@@ -556,6 +669,8 @@ final class SceneShapeRenderer
                 it.remove();
             }
         }
+        // Projections of models not drawn this frame are dropped.
+        projections.values().removeIf(p -> p.frame != frame);
         // Reclaim vacated tiles before allocating models for newly occupied tiles.
         for (Bucket b : buckets.values())
         {
@@ -567,18 +682,26 @@ final class SceneShapeRenderer
 
     private boolean write(Bucket b)
     {
-        int anchorX = b.tileX * 128 + 64, anchorY = b.tileY * 128 + 64;
-        float z = 0;
-        for (int i = 0; i < b.vertices; i++) { z += b.wz[i]; }
-        int anchorZ = Math.round(z / b.vertices);
-        float extent = 0;
-        for (int i = 0; i < b.vertices; i++)
+        int anchorX = b.tileX * 128 + 64, anchorY = b.tileY * 128 + 64, anchorZ;
+        if (b.shared)
+        {
+            anchorX = Math.max(b.tileX * 128, Math.min(b.tileX * 128 + 127, xrayAnchor.getX()));
+            anchorY = Math.max(b.tileY * 128, Math.min(b.tileY * 128 + 127, xrayAnchor.getY()));
+            anchorZ = xrayHeight;
+        }
+        else
+        {
+            float z = 0;
+            for (int i = 0; i < b.vertices; i++) { z += b.wz[i]; }
+            anchorZ = Math.round(z / b.vertices);
+        }
+        // Through walls: the geometry is pulled towards the camera, at most XRAY_REACH from the anchor.
+        float extent = b.xray ? XRAY_REACH + 16 : 0;
+        for (int i = 0; i < b.vertices && !b.xray; i++)
         {
             float dx = b.wx[i] - anchorX, dy = b.wy[i] - anchorY, dz = b.wz[i] - anchorZ;
             extent = Math.max(extent, Math.max((float) Math.hypot(dx, dy), Math.abs(dz)));
         }
-        // Through walls: the geometry is pulled towards the camera, at most XRAY_REACH from the anchor.
-        if (b.xray) { extent = Math.max(extent, XRAY_REACH + 16); }
         if (b.model == null || b.model.getVerticesCount() < b.vertices || b.model.getFaceCount() < b.faces || extent > b.radius)
         {
             b.hide();
@@ -668,8 +791,10 @@ final class SceneShapeRenderer
         int radius, usedFaces, usedVertices, vertices, faces;
         float[] wx = new float[64], wy = new float[64], wz = new float[64];
         int[] layer = new int[64];
+        /** Stacked copy per vertex (see stack): each copy slightly nearer the camera than the one before. */
+        int[] copy = new int[64];
         int[] fa = new int[96], fb = new int[96], fc = new int[96], color = new int[96], alpha = new int[96];
-        boolean xray;
+        boolean xray, shared;
         int anchorX, anchorY, anchorZ;
 
         /**
@@ -683,8 +808,9 @@ final class SceneShapeRenderer
             for (int i = 0; i < vertices; i++)
             {
                 cam.project(wx[i], wy[i], wz[i], p);
-                float at = Math.max(ModelShapes.NEAR + 1, XRAY_NEAR + p[2] * XRAY_SCALE - layer[i] * 0.25f);
-                at = withinReach(cam, wx[i], wy[i], wz[i], p[2], at, layer[i]);
+                int c = Math.max(0, copy[i]);
+                float at = Math.max(ModelShapes.NEAR + 1, XRAY_NEAR + p[2] * XRAY_SCALE - layer[i] * 0.25f - c * 0.03f);
+                at = withinReach(cam, wx[i], wy[i], wz[i], p[2], at, layer[i] * 0.25f + c * 0.03f);
                 cam.unproject(p[0], p[1], at, p);
                 vx[i] = p[0] - anchorX;
                 vy[i] = p[2] - anchorZ;
@@ -696,7 +822,7 @@ final class SceneShapeRenderer
          * The depth to use on the ray from the camera to ground point g (at depth dg): the wanted depth,
          * or, when that lies farther than XRAY_REACH from the anchor, the nearest depth within it.
          */
-        private float withinReach(ModelShapes.Camera cam, float gx, float gy, float gz, float dg, float wanted, int layer)
+        private float withinReach(ModelShapes.Camera cam, float gx, float gy, float gz, float dg, float wanted, float bias)
         {
             if (!(dg > 0)) { return wanted; }
             // Points on the ray: camera + (g - camera) * s, where s = depth / dg.
@@ -706,11 +832,13 @@ final class SceneShapeRenderer
             double c = ux * ux + uy * uy + uz * uz - (double) XRAY_REACH * XRAY_REACH;
             double disc = b * b - 4 * a * c;
             if (a <= 0 || disc < 0) { return dg; }
-            double enter = (-b - Math.sqrt(disc)) / (2 * a);
+            double enter = (-b - Math.sqrt(disc)) / (2 * a), exit = (-b + Math.sqrt(disc)) / (2 * a);
             double s = wanted / dg;
+            // A camera inside the reach: far points could be wanted beyond it.
+            if (s > exit) { return (float) Math.max(ModelShapes.NEAR + 1, exit * dg - bias); }
             if (s >= enter) { return wanted; }
-            // Clamped: keep the layer order among shapes at the same place.
-            return (float) Math.min(dg, enter * dg) - layer * 0.25f;
+            // Clamped: keep the layer (and stacked copy) order among shapes at the same place.
+            return (float) Math.min(dg, enter * dg) - bias;
         }
 
         Bucket(int tileX, int tileY, int level, int worldView)
@@ -723,6 +851,7 @@ final class SceneShapeRenderer
                 int n = vertexCount * 2;
                 wx = Arrays.copyOf(wx, n); wy = Arrays.copyOf(wy, n); wz = Arrays.copyOf(wz, n);
                 layer = Arrays.copyOf(layer, n);
+                copy = Arrays.copyOf(copy, n);
             }
             if (fa.length < faceCount)
             {

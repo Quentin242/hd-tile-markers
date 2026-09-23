@@ -83,6 +83,11 @@ final class IndicatorOverlay extends Overlay
                 finally { bnh.dispose(); }
             }
             for (NPC guard : plugin.stealingArrows()) { facingArrow(g, guard); }
+            // The Gauntlet's resource icons, as its MazeOverlay draws them.
+            for (java.util.Map.Entry<net.runelite.api.coords.LocalPoint, java.awt.image.BufferedImage> icon : plugin.gauntletIcons().entrySet())
+            {
+                OverlayUtil.renderImageLocation(client, g, icon.getKey(), icon.getValue(), 0);
+            }
             for (ModelTarget t : plugin.modelTargets())
             {
                 // Better NPC Highlight owns its style-specific fallback above.
@@ -104,8 +109,13 @@ final class IndicatorOverlay extends Overlay
                 if (shape != null) { draw(g, shape, hover); }
             }
             // Higher layers last, so your own tile and destination end up on top in 2D too.
-            java.util.List<Marker> ordered = new java.util.ArrayList<>(plugin.markers());
-            ordered.sort(java.util.Comparator.comparingInt(m -> m.layer));
+            // Only 2D tiles need the layer order; in the scene only labels are drawn here.
+            java.util.List<Marker> ordered = plugin.markers();
+            if (plugin.tilesIn2d())
+            {
+                ordered = new java.util.ArrayList<>(ordered);
+                ordered.sort(java.util.Comparator.comparingInt(m -> m.layer));
+            }
             for (Marker m : ordered)
             {
                 // Without replacement the original Ground Markers overlay draws these.

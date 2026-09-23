@@ -129,10 +129,11 @@ public class SceneShapeRendererTest
         assertTrue(corner[2] < terrain[2]);
         // 8 opaque border faces, then 4 fill faces at alpha 50, then hidden faces.
         assertEquals(FlatModel.hsl(Color.RED), carrier.getFaceColors1()[0]);
-        assertEquals(-1, carrier.getFaceColors3()[7]);
+        // Visible faces carry their colour on all three corners (not -1, "flat": see FlatModel.paint).
+        assertEquals(FlatModel.hsl(Color.RED), carrier.getFaceColors3()[7]);
         assertEquals((byte) 0, carrier.getFaceTransparencies()[7]);
         assertEquals((byte) (255 - 50), carrier.getFaceTransparencies()[8]);
-        assertEquals(-1, carrier.getFaceColors3()[11]);
+        assertEquals(FlatModel.hsl(new Color(0, 0, 0, 50)), carrier.getFaceColors3()[11]);
         assertEquals(-2, carrier.getFaceColors3()[12]);
     }
 
@@ -160,6 +161,43 @@ public class SceneShapeRendererTest
             found = Math.hypot(drawn[0] - terrain[0], drawn[1] - terrain[1]) <= 3;
         }
         assertTrue("a vertex lies at the east corner of the diamond", found);
+    }
+
+    @Test public void stackedCopiesLookAsOpaqueButEachStaysUnderHdsShadowThreshold()
+    {
+        for (int[] rule : new int[][]{{SceneShapeRenderer.HD_CAP_OPAQUE_SHADOWS, SceneShapeRenderer.HD_STACK_OPAQUE_SHADOWS}})
+        {
+            for (int alpha = 1; alpha <= 255; alpha++)
+            {
+                int[] st = SceneShapeRenderer.stack(alpha, rule[0], rule[1]);
+                assertTrue(st[1] <= rule[0] && st[0] <= rule[1]);
+                double seen = 1 - Math.pow(1 - st[1] / 255.0, st[0]);
+                // As opaque as asked, or as close as the copies allow.
+                assertTrue(alpha + " -> " + seen, seen >= alpha / 255.0 - 1e-9 || st[0] == rule[1] && st[1] == rule[0]);
+            }
+        }
+        // Shadow transparency off: an opaque border is two copies of 180 (91 % to the eye), each under 0.71.
+        assertArrayEquals(new int[]{2, 180}, SceneShapeRenderer.stack(255, 180, 2));
+        assertTrue(180 / 255.0 <= 0.71);
+    }
+
+    @Test public void floatingOpaqueBordersAreStackedUnderHd()
+    {
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        renderer.floatingAlphaCap = SceneShapeRenderer.HD_CAP_OPAQUE_SHADOWS;
+        renderer.maxStack = SceneShapeRenderer.HD_STACK_OPAQUE_SHADOWS;
+        renderer.begin(CAMERA, 1, new LocalPoint(1344, 1344, -1), 0);
+        assertTrue(renderer.tile(new Marker("t", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, Marker.NO_FILL, 2, null, false)));
+        assertTrue(renderer.end());
+        int borders = 0;
+        for (int f = 0; f < alphaCarrier.getFaceCount(); f++)
+        {
+            if (alphaCarrier.getFaceColors3()[f] == -2) { continue; }
+            borders++;
+            // Transparency byte 255 - alpha: every copy at most 180 opaque.
+            assertTrue(255 - (alphaCarrier.getFaceTransparencies()[f] & 0xff) <= 180);
+        }
+        assertEquals(8 * 2, borders);
     }
 
     @Test public void normalsPointUpFromEveryCameraAngle()
@@ -244,7 +282,7 @@ public class SceneShapeRendererTest
         int visible = 0, opaque = 0;
         for (int f = 0; f < alphaCarrier.getFaceCount(); f++)
         {
-            if (alphaCarrier.getFaceColors3()[f] == -1)
+            if (alphaCarrier.getFaceColors3()[f] != -2)
             {
                 visible++;
                 if (alphaCarrier.getFaceTransparencies()[f] == 0) { opaque++; }
@@ -278,7 +316,7 @@ public class SceneShapeRendererTest
         assertTrue(renderer.drawn("object:1:clickbox"));
         // Border: 2 faces per edge; fill: an ear-clipped L of 4 triangles.
         int visible = 0;
-        for (int f = 0; f < alphaCarrier.getFaceCount(); f++) { if (alphaCarrier.getFaceColors3()[f] == -1) { visible++; } }
+        for (int f = 0; f < alphaCarrier.getFaceCount(); f++) { if (alphaCarrier.getFaceColors3()[f] != -2) { visible++; } }
         assertEquals(12 + 4, visible);
     }
 
@@ -306,6 +344,34 @@ public class SceneShapeRendererTest
             CAMERA.project(o.getX() + vx[i], o.getY() + vz[i], o.getZ() + vy[i], p);
             assertTrue(p[2] < terrain[2] - 1000);
             assertTrue(Math.sqrt(vx[i] * vx[i] + vy[i] * vy[i] + vz[i] * vz[i]) <= SceneShapeRenderer.XRAY_REACH + 16);
+            if (Math.hypot(p[0] - terrain[0], p[1] - terrain[1]) <= 4) { cornerFound = true; }
+        }
+        assertTrue(cornerFound);
+    }
+
+    @Test public void throughWallsHangsAtTheCameraHeightWhenTheCameraIsNear()
+    {
+        // Renderers draw see-through models farthest first: at the camera's height, over the visible ground
+        // nearest the camera, the marks come after nearer see-through objects such as tree leaves.
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        LocalPoint nearest = new LocalPoint(1344, 344, -1);
+        renderer.begin(CAMERA, 1, nearest, 0);
+        renderer.tile(new Marker("a", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, null, 2, null, false));
+        renderer.tile(new Marker("b", new LocalPoint(2600, 2600, -1), 0, 1, 1, Color.RED, null, 2, null, false));
+        assertTrue(renderer.end());
+        ArgumentCaptor<RuneLiteObjectController> registered = ArgumentCaptor.forClass(RuneLiteObjectController.class);
+        verify(client).registerRuneLiteObject(registered.capture());
+        RuneLiteObjectController o = registered.getValue();
+        assertEquals(1344, o.getX()); assertEquals(344, o.getY()); assertEquals(-1500, o.getZ());
+        float[] vx = alphaCarrier.getVerticesX(), vy = alphaCarrier.getVerticesY(), vz = alphaCarrier.getVerticesZ();
+        float[] p = new float[3], terrain = new float[3];
+        CAMERA.project(1280, 1280, Terrain.height(wv, 1280, 1280, 0), terrain);
+        boolean cornerFound = false;
+        for (int i = 0; i < 32; i++)
+        {
+            assertTrue(Math.sqrt(vx[i] * vx[i] + vy[i] * vy[i] + vz[i] * vz[i]) <= SceneShapeRenderer.XRAY_REACH + 16);
+            CAMERA.project(o.getX() + vx[i], o.getY() + vz[i], o.getZ() + vy[i], p);
+            assertTrue(p[2] < terrain[2] - 1000);
             if (Math.hypot(p[0] - terrain[0], p[1] - terrain[1]) <= 4) { cornerFound = true; }
         }
         assertTrue(cornerFound);
@@ -488,6 +554,29 @@ public class SceneShapeRendererTest
         assertFalse(renderer.model(ModelTarget.npcOutline("first:outline", first, Color.RED, 2)));
         verify(first, times(2)).getModel();
         assertTrue("offscreen shapes suppress the expensive 2D fallback", renderer.drawn("first:outline"));
+    }
+
+    @Test public void staticObjectOutlineIsReusedWhileTheCameraStandsStill()
+    {
+        Model mesh = triangle();
+        GameObject object = mock(GameObject.class);
+        when(object.getX()).thenReturn(1344); when(object.getY()).thenReturn(1344);
+        when(object.getWorldView()).thenReturn(wv);
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        ModelTarget target = ModelTarget.objectOutline("tree:outline", object, mesh, 0, 0, Color.RED, 2);
+        for (int i = 0; i < 3; i++)
+        {
+            renderer.begin(CAMERA, 1);
+            assertTrue(renderer.model(target));
+            assertTrue(renderer.end());
+        }
+        // Projected and traced once for three frames with the same camera.
+        verify(mesh, times(1)).getFaceIndices1();
+        ModelShapes.Camera moved = new ModelShapes.Camera(1344 + 40, 1344 - 2000, -1500, 0.6f, 0, 600, 0, 0, 1000, 700);
+        renderer.begin(moved, 1);
+        assertTrue(renderer.model(target));
+        assertTrue(renderer.end());
+        verify(mesh, times(2)).getFaceIndices1();
     }
 
     @Test public void offscreenOutlineSkipsTopologyAndFallback()

@@ -31,6 +31,13 @@ final class ModelShapes
             centerY = viewportY + viewportHeight / 2f;
         }
 
+        /** Whether another camera projects exactly as this one. */
+        boolean same(Camera o)
+        {
+            return o == this || o != null && x == o.x && y == o.y && z == o.z && pitchSin == o.pitchSin && pitchCos == o.pitchCos
+                && yawSin == o.yawSin && yawCos == o.yawCos && scale == o.scale && centerX == o.centerX && centerY == o.centerY;
+        }
+
         /** Writes canvas x, canvas y and depth into out. Local x/y are horizontal, z is height (down positive). */
         void project(float lx, float ly, float lz, float[] out)
         {

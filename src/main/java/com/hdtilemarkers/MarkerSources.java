@@ -137,6 +137,7 @@ final class MarkerSources
 
     List<Marker> collect(List<PathMarker.SceneTile> pathTiles)
     {
+        visible = null;
         List<Marker> result = new ArrayList<>();
         if (config.ground() && groundEnabled) { result.addAll(ground); }
         if (tilePacksEnabled) { result.addAll(tilePackMarkers); }
@@ -200,7 +201,7 @@ final class MarkerSources
             { result.add(layer(Marker.NPC_TILE + 3, npcMarker(key + ":swtrue", trueSw, npcPlane, 1, color))); }
         }
         // Object Markers' tile style: its tile stroke is capped at 2.
-        for (ObjectMarkerSource.Resolved o : objectsEnabled() ? objectMarkers.visible() : Collections.<ObjectMarkerSource.Resolved>emptyList())
+        for (ObjectMarkerSource.Resolved o : visibleObjects())
         {
             if ((o.flags & ObjectMarkerSource.HF_TILE) == 0) { continue; }
             TileObject object = o.object;
@@ -385,13 +386,27 @@ final class MarkerSources
     private static boolean style(String override, String name, boolean configured)
     { return override != null ? override.equals(name) : configured; }
 
-    private String npcStyle(NPC npc) { return configs.getConfiguration(NpcIndicatorsConfig.GROUP, "tagstyle_" + npc.getId()); }
+    /**
+     * NPC Indicators' per-NPC style and colour, looked up once per NPC id: they are read several times
+     * per frame. A change of its settings rebuilds the sources, which clears these.
+     */
+    private final Map<Integer, Optional<String>> styles = new HashMap<>();
+    private final Map<Integer, Color> colors = new HashMap<>();
+
+    private String npcStyle(NPC npc)
+    {
+        return styles.computeIfAbsent(npc.getId(),
+            id -> Optional.ofNullable(configs.getConfiguration(NpcIndicatorsConfig.GROUP, "tagstyle_" + id))).orElse(null);
+    }
 
     private Color npcColor(NPC npc)
     {
-        Color color = configs.getConfiguration(NpcIndicatorsConfig.GROUP, "highlightcolor_" + npc.getId(), Color.class);
-        return color != null ? color : npcConfig.highlightColor();
+        return colors.computeIfAbsent(npc.getId(), id -> {
+            Color color = configs.getConfiguration(NpcIndicatorsConfig.GROUP, "highlightcolor_" + id, Color.class);
+            return color != null ? color : npcConfig.highlightColor();
+        });
     }
+
 
     /** NPC Indicators' render(): dead NPCs and pets follow its settings. */
     private boolean renderNpc(NPC npc)
@@ -417,7 +432,7 @@ final class MarkerSources
             if (!npcsEnabled || npc.getWorldView() != top || !renderNpc(npc) || !style(npcStyle(npc), "hull", npcConfig.highlightHull())) { continue; }
             result.add(ModelTarget.npc("npc:" + npc.getIndex() + ":hull", npc, npcColor(npc), npcConfig.fillColor(), npcConfig.borderWidth()));
         }
-        for (ObjectMarkerSource.Resolved o : objectsEnabled() ? objectMarkers.visible() : Collections.<ObjectMarkerSource.Resolved>emptyList())
+        for (ObjectMarkerSource.Resolved o : visibleObjects())
         {
             TileObject object = o.object;
             if (object.getWorldView() != top) { continue; }
@@ -512,11 +527,23 @@ final class MarkerSources
     {
         List<ObjectMarkerSource.Resolved> result = new ArrayList<>();
         if (!objectsEnabled()) { return result; }
-        for (ObjectMarkerSource.Resolved o : objectMarkers.visible())
+        for (ObjectMarkerSource.Resolved o : visibleObjects())
         {
             if ((o.flags & ObjectMarkerSource.HF_OUTLINE) != 0) { result.add(o); }
         }
         return result;
+    }
+
+    /**
+     * Object Markers' visible marks, resolved at most once per tick (collect() starts a new one)
+     * and shared by the lookups that follow; objects spawning or despawning resolve them again.
+     */
+    private List<ObjectMarkerSource.Resolved> visible;
+
+    private List<ObjectMarkerSource.Resolved> visibleObjects()
+    {
+        if (visible == null) { visible = objectsEnabled() ? objectMarkers.visible() : Collections.emptyList(); }
+        return visible;
     }
 
     private boolean objectsEnabled() { return objectsEnabled && config.objectMarkers(); }
@@ -542,14 +569,14 @@ final class MarkerSources
         return false;
     }
 
-    void add(TileObject object) { objectMarkers.check(object); }
-    void remove(TileObject object) { objectMarkers.remove(object); }
+    void add(TileObject object) { objectMarkers.check(object); visible = null; }
+    void remove(TileObject object) { objectMarkers.remove(object); visible = null; }
     void add(NPC npc) { npcs.remove(npc); if (isHighlighted(npc)) { npcs.add(npc); } }
     void remove(NPC npc) { npcs.remove(npc); }
-    void removeWorldView(WorldView wv) { objectMarkers.removeWorldView(wv); npcs.removeIf(n -> n.getWorldView() == wv); }
+    void removeWorldView(WorldView wv) { objectMarkers.removeWorldView(wv); npcs.removeIf(n -> n.getWorldView() == wv); visible = null; }
     boolean validGround() { return validGround; }
     boolean validObjects() { return objectMarkers.valid(); }
-    void clear() { predicted = null; predictedWorld = null; predictionConfirmed = false;
+    void clear() { styles.clear(); colors.clear(); visible = null; predicted = null; predictedWorld = null; predictionConfirmed = false;
         lastPlayerTile = null; lastDestination = null; stillSince = 0; arrivedAt = 0; lastHit = 0;
         tilePackMarkers.clear(); tilePacks.clear(); ground.clear(); npcs.clear(); objectMarkers.clear(); npcHighlights = Collections.emptyList(); validGround = true; }
 

@@ -54,6 +54,10 @@ public class PluginInjectionTest
             binder.bind(net.runelite.client.plugins.slayer.SlayerPluginService.class).toProvider(() -> slayerService);
             net.runelite.client.plugins.npcunaggroarea.NpcAggroAreaPlugin aggro = mock(net.runelite.client.plugins.npcunaggroarea.NpcAggroAreaPlugin.class);
             binder.bind(net.runelite.client.plugins.npcunaggroarea.NpcAggroAreaPlugin.class).toProvider(() -> aggro);
+            binder.bind(net.runelite.client.game.SkillIconManager.class).toInstance(mock(net.runelite.client.game.SkillIconManager.class));
+            net.runelite.client.plugins.agility.AgilityPlugin agilityPlugin = mock(net.runelite.client.plugins.agility.AgilityPlugin.class);
+            binder.bind(net.runelite.client.plugins.agility.AgilityPlugin.class).toProvider(() -> agilityPlugin);
+            binder.bind(net.runelite.client.chat.ChatMessageManager.class).toInstance(mock(net.runelite.client.chat.ChatMessageManager.class));
             binder.bind(KeyManager.class).toInstance(keys);
             binder.bind(MouseManager.class).toInstance(mouse);
             binder.bind(net.runelite.client.game.SpriteManager.class).toInstance(mock(net.runelite.client.game.SpriteManager.class));
@@ -85,5 +89,25 @@ public class PluginInjectionTest
         verify(configs, never()).setConfiguration(anyString(), anyString(), anyString());
         plugin.shutDown();
         verify(keys).unregisterKeyListener(any());
+    }
+
+    /**
+     * PluginManager binds each dependency into this plugin's injector and injects its fields there,
+     * without its own dependencies: those must be declared here too, or the plugin fails to load.
+     */
+    @Test public void dependenciesOfDependenciesAreDeclared()
+    {
+        java.util.Set<Class<?>> declared = new java.util.HashSet<>();
+        for (net.runelite.client.plugins.PluginDependency d : HdTileMarkersPlugin.class.getAnnotationsByType(net.runelite.client.plugins.PluginDependency.class))
+        {
+            declared.add(d.value());
+        }
+        for (Class<?> dependency : declared)
+        {
+            for (net.runelite.client.plugins.PluginDependency d : dependency.getAnnotationsByType(net.runelite.client.plugins.PluginDependency.class))
+            {
+                org.junit.Assert.assertTrue(dependency.getSimpleName() + " needs " + d.value().getSimpleName(), declared.contains(d.value()));
+            }
+        }
     }
 }

@@ -51,15 +51,6 @@ public interface HdTileMarkersConfig extends Config
     @ConfigItem(keyName = "tilesThroughWalls", name = "Through walls", description = "Draw all marks (tiles, hulls, clickboxes, outlines) in front of walls, objects and characters, like the normal 2D overlays. They then also get the same colour from every angle with 117 HD", position = 3, section = generalSection)
     default boolean tilesThroughWalls() { return true; }
 
-    @ConfigItem(keyName = "stealingArtefacts", name = "Stealing Artefacts", description = "Draw the Stealing Artefacts plugin's drawers, ladders, guards and Captain Khaled in the scene, with its settings, and hide its overlays while HD Tile Markers draws them", position = 4, section = generalSection)
-    default boolean stealingArtefacts() { return true; }
-
-    @ConfigItem(keyName = "sailing", name = "Sailing", description = "Draw the Sailing plugin's sea marks in the scene (rapids, lightning clouds, wrecks, lost crates, boat true tile), with its settings, and hide those overlays while HD Tile Markers draws them. Marks on the boat itself stay its own", position = 5, section = generalSection)
-    default boolean sailing() { return true; }
-
-    @ConfigItem(keyName = "aggressionArea", name = "NPC Aggression Timer", description = "Draw the NPC Aggression Timer's area lines in the scene, with its colours, and hide its line overlay while HD Tile Markers draws them. Its timer stays its own", position = 6, section = generalSection)
-    default boolean aggressionArea() { return true; }
-
     @ConfigItem(keyName = "predictWalk", name = "Predict walk target", description = "After Walk here, show the clicked tile as destination and a predicted path, also when you click beyond the loaded area (such as 117 HD's extended terrain). Beyond it, heights and walls are unknown: the path is a straight line.", position = 2, section = generalSection)
     default boolean predictWalk() { return true; }
 
@@ -67,9 +58,6 @@ public interface HdTileMarkersConfig extends Config
 
     @ConfigItem(keyName = "ground", name = "Ground Markers", description = "Draw saved Ground Markers, including imported tiles", position = 0, section = groundSection)
     default boolean ground() { return true; }
-
-    @ConfigItem(keyName = "tilePacks", name = "Tile Packs", description = "Draw the packs enabled in the Tile Packs plugin, with its colors and settings, and hide its overlay while HD Tile Markers draws them", position = 2, section = groundSection)
-    default boolean tilePacks() { return true; }
 
     @ConfigItem(keyName = "replaceGround", name = "Replace Ground Markers overlay", description = "Hide the original ground lines while HD Tile Markers draws them; labels and minimap stay", position = 1, section = groundSection)
     default boolean replaceGround() { return true; }
@@ -173,12 +161,6 @@ public interface HdTileMarkersConfig extends Config
     @Range(min = 2, max = 20)
     @ConfigItem(keyName = "currentTileCornerSize", name = "Current Corner Size", description = "Each corner line is this fraction (1/size) of the tile side", position = 5, section = currentSection)
     default int currentTileCornerSize() { return 5; }
-
-
-
-
-
-
 
     // Objects
 

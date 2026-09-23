@@ -22,13 +22,14 @@ Changes made for HD Tile Markers:
 ## RuneLite
 
 - Source: https://github.com/runelite/runelite, tag `runelite-parent-1.12.39`
-- License: BSD 2-Clause, copyright (c) 2016-2017 Adam, (c) 2018 Tomas Slusny, TheLonelyDev, James Swindle and Woox, and the RuneLite contributors. Full text in `src/main/resources/META-INF/LICENSE-runelite`, included in the JAR.
+- License: BSD 2-Clause, copyright (c) 2016-2017 Adam, (c) 2018 Tomas Slusny, TheLonelyDev, James Swindle, Woox, Cas and SomeoneWithAnInternetConnection, and the RuneLite contributors. Full text in `src/main/resources/META-INF/LICENSE-runelite`, included in the JAR.
 
 HD Tile Markers does not copy RuneLite source files as a whole. It reads Ground Markers, Object Markers and NPC Indicators data through the public configuration API, and adapts these parts; each file names its origin in a header:
 
 - `ObjectMarkerSource.java`: matching and display rules of Object Markers (`ObjectIndicatorsPlugin.checkObjectPoints`, `loadPoints`, `ObjectIndicatorsOverlay.render`). Read-only, no menus, marks returned to HD Tile Markers' renderer.
 - `MarkerSources.java`: Ground Markers' point loading (`GroundMarkerPlugin.loadPoints`) and NPC Indicators' selection (`getHighlights`, `highlightMatchesNPCName`, `render`, per-NPC `highlightcolor_` and `tagstyle_` keys).
 - `AggroAreaSource.java`: the display rules of NPC Aggression Timer's area lines (`NpcAggroAreaOverlay.render`, `renderPath`: colour by timer, hide out of combat, 20-tile range). The lines themselves are read through the plugin's public getters.
+- `AgilitySource.java` and `AgilityObstacles.java`: the Agility plugin's display rules (`AgilityOverlay.render`, `highlightTile`), its shortcut matching (`AgilityPlugin.onTileObject`) and its obstacle ID lists (`Obstacles`, copied unchanged). Obstacles, marks of grace and Sepulchre NPCs are read through the plugin's public getters.
 - `Terrain.java`: the height interpolation of `Perspective.getTileHeight`.
 - `ModelShapes.java`: the projection math of `Perspective.localToCanvasGpu` / `modelToCanvas`.
 - `HdTileMarkersConfig.java`: the option names and descriptions of Tile Indicators (`TileIndicatorsConfig`); defaults use the original HD Tile Markers development preset.
@@ -74,3 +75,12 @@ HD Tile Markers contains no code from this plugin. The Tile Indicators options "
 - License: BSD 2-Clause, copyright (c) 2025 LlemonDuck. Full text in `src/main/resources/META-INF/LICENSE-sailing`, included in the JAR.
 
 `SailingSource.java` adapts the target rules of its `RapidsOverlay` (rapid ids, helm tiers of `HelmTier`), `LightningCloudsOverlay`, `SalvagingHighlight` (wreck levels, 15-tile area), `LostCargoHighlighter` and `TrueTileIndicator` (`renderBoatArea`), plus its option keys and defaults. Read-only: HD Tile Markers reads its settings, never writes them. Its other features (boat facilities, charting, courier, trials helpers, panels) stay with that plugin.
+
+## The Gauntlet
+
+- Authors: rdutta; maintained by LlemonDuck
+- Source: https://github.com/LlemonDuck/the-gauntlet
+- Commit: `bf0246abf6dc04ce5541264c10e663536f9864c2`
+- License: BSD 2-Clause, copyright (c) 2023 rdutta. Full text in `src/main/resources/META-INF/LICENSE-the-gauntlet`, included in the JAR.
+
+`GauntletSource.java` adapts the resource and utility object IDs (`MazeModule`, `ResourceGameObject`, `Resource`), the chat message resource tracking (`ResourceManager`) and the display rules and icons of `MazeOverlay`. Read-only: HD Tile Markers reads its settings, never writes them. Its NPC highlights, infobox counters, minimap and timer stay with that plugin.

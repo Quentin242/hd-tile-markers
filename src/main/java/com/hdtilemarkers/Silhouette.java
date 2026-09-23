@@ -13,6 +13,8 @@ final class Silhouette
 {
     /** Grid cells per canvas pixel. */
     static final int CELLS_PER_PIXEL = 2;
+    /** Screen area (pixels) above which a shape is traced at one cell per pixel. */
+    static final int LARGE_SHAPE_PIXELS = 150 * 150;
     static final int MAX_CELLS = 1 << 20;
     private static final long MAX_RASTER_WORK = 8L * MAX_CELLS;
 
@@ -48,9 +50,11 @@ final class Silhouette
             maxY = Math.max(maxY, Math.max(y[i], Math.max(y[j], y[k])));
         }
         if (minX > maxX) { return Collections.emptyList(); }
-        float scale = CELLS_PER_PIXEL;
-        // Coarser for very large shapes, to bound the work per frame.
         double width = (double) maxX - minX, height = (double) maxY - minY;
+        // Large shapes on screen trace at one cell per pixel: four times less work, and half a
+        // pixel of precision is not visible at that size.
+        float scale = width * height > LARGE_SHAPE_PIXELS ? 1 : CELLS_PER_PIXEL;
+        // Coarser still for very large shapes, to bound the work per frame.
         while (paddedCells(width, height, scale) > MAX_CELLS && scale > 0.25f) { scale /= 2; }
         // Oversized/elongated projections use the source's 2D outline instead. Check the
         // padded dimensions before narrowing to ints or allocating any raster memory.

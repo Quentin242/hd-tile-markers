@@ -29,6 +29,14 @@ final class WalkPredictor
      */
     static WorldPoint raycast(ModelShapes.Camera camera, float mx, float my, WorldView wv, int plane)
     {
+        float[] p = ground(camera, mx, my, wv, plane);
+        return p == null ? null
+            : new WorldPoint(wv.getBaseX() + (int) Math.floor(p[0] / 128), wv.getBaseY() + (int) Math.floor(p[1] / 128), plane);
+    }
+
+    /** The local point {x, y, height} where the ray through canvas point (mx, my) meets the terrain, or null. */
+    static float[] ground(ModelShapes.Camera camera, float mx, float my, WorldView wv, int plane)
+    {
         float[] p = new float[3];
         float previous = ModelShapes.NEAR;
         for (float depth = ModelShapes.NEAR; depth < 40000; depth += 32)
@@ -45,7 +53,7 @@ final class WalkPredictor
                     if (p[2] >= Terrain.height(wv, (int) p[0], (int) p[1], plane)) { high = mid; } else { low = mid; }
                 }
                 camera.unproject(mx, my, high, p);
-                return new WorldPoint(wv.getBaseX() + (int) Math.floor(p[0] / 128), wv.getBaseY() + (int) Math.floor(p[1] / 128), plane);
+                return p;
             }
             previous = depth;
         }

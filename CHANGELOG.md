@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+performance and shadow improvements
+
 ## 0.1.2
 
 Use the original development preset as the plugin defaults, including tile colors, corner markers, path colors and draw distance. Existing saved settings retain precedence.

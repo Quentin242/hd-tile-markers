@@ -2,7 +2,7 @@
  * Adapted from Path Marker by GeChallengeM
  * https://github.com/GeChallengeM/path-marker, commit 495f3594bf697a1b9a5313802f731b2c85a6e37e
  * Copyright (c) 2022, GeChallengeM. BSD 2-Clause License; see META-INF/LICENSE-path-marker
- * and THIRD_PARTY_NOTICES.md. Changes for HD Tile Markers: no longer a Plugin (creates its listeners and minimap overlay itself); started by HD Tile Markers; Lombok replaced by accessors; config and enums from HD Tile Markers; scene tiles are drawn by the HD Tile Markers renderer instead of PathMarkerOverlay, whose display conditions moved to sceneTiles().
+ * and THIRD_PARTY_NOTICES.md. Changes for HD Tile Markers: no longer a Plugin (creates its listeners and minimap overlay itself); started by HD Tile Markers; Lombok replaced by accessors; config and enums from HD Tile Markers; scene tiles are drawn by the HD Tile Markers renderer instead of PathMarkerOverlay, whose display conditions moved to sceneTiles(); the minimap route and hover tiles are only recalculated when their input changes.
  */
 package com.hdtilemarkers.pathmarker;
 
@@ -90,6 +90,11 @@ public class PathMarker
     private boolean activePathMismatchLastTick;
 
     private boolean calcTilePathOnNextClientTick;
+    // Inputs of the last minimap route and hover tiles, to skip recalculating unchanged ones.
+    private Point lastMinimapPoint;
+    private WorldPoint lastMinimapFrom, lastHoverStart;
+    private List<WorldPoint> lastHoverCheckpoints;
+    private boolean lastHoverRunning, lastHoverFound;
 
     private long hoverPathId;
 
@@ -271,6 +276,8 @@ public class PathMarker
             case RUNELITE_PLAYER:
             {
                 hoverCheckpointWPs.clear();
+                // Cleared in place: the hover tiles must be rebuilt.
+                lastHoverCheckpoints = null;
                 hoverPathId = 0;
                 return null;
             }
@@ -1155,9 +1162,14 @@ public class PathMarker
         if (menuEntries.length == 1 && !client.isMenuOpen()
             && (leftClicked || (config.hoverPathDisplaySetting() != HdTileMarkersConfig.PathDisplaySetting.NEVER)))
         {
-            // Potential minimap hover/click
+            // Potential minimap hover/click. The route is only recalculated when the hovered minimap
+            // tile or the player's tile changes, or on a click (HD Tile Markers change).
             Point point = minimapToScenePoint();
-            if (point != null)
+            WorldPoint from = client.getLocalPlayer().getWorldLocation();
+            boolean sameMinimapRoute = point != null && point.equals(lastMinimapPoint) && from.equals(lastMinimapFrom);
+            lastMinimapPoint = point;
+            lastMinimapFrom = from;
+            if (point != null && (leftClicked || !sameMinimapRoute))
             {
                 Pair<List<WorldPoint>, Boolean> pathResult = pathfinder.pathTo(point.getX(), point.getY(), 1,1,-1,-1);
                 if (pathResult != null)
@@ -1205,7 +1217,18 @@ public class PathMarker
         leftClicked = false;
         lastMouseCanvasPosition=client.getMouseCanvasPosition();
         lastSelectedSceneTile = selectedSceneTile;
-        pathFromCheckpointTiles(hoverCheckpointWPs, willRunOnClick(), hoverMiddlePathTiles, hoverPathTiles, hoverPathFound);
+        // Hover tiles are only rebuilt when their route, run state or starting tile changed (HD Tile Markers change).
+        boolean running = willRunOnClick();
+        WorldPoint start = client.getLocalPlayer().getWorldLocation();
+        if (hoverCheckpointWPs != lastHoverCheckpoints || running != lastHoverRunning || hoverPathFound != lastHoverFound
+            || !start.equals(lastHoverStart))
+        {
+            pathFromCheckpointTiles(hoverCheckpointWPs, running, hoverMiddlePathTiles, hoverPathTiles, hoverPathFound);
+            lastHoverCheckpoints = hoverCheckpointWPs;
+            lastHoverRunning = running;
+            lastHoverFound = hoverPathFound;
+            lastHoverStart = start;
+        }
     }
 
     private MenuEntry hoveredMenuEntry(final MenuEntry[] menuEntries)

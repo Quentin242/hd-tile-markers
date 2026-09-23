@@ -20,8 +20,9 @@ final class FlatModel
     {
         m.getFaceColors1()[face] = hsl;
         m.getFaceColors2()[face] = hsl;
-        // -1 draws the face flat with faceColors1; -2 hides it.
-        m.getFaceColors3()[face] = alpha == 0 ? -2 : -1;
+        // Three equal corner colours draw the face in one colour; -2 hides it. Not -1 ("flat"): for flat
+        // faces 117 HD ignores the vertex normals and takes the triangle's own, which turns with the camera.
+        m.getFaceColors3()[face] = alpha == 0 ? -2 : hsl;
         byte[] transparencies = m.getFaceTransparencies();
         if (transparencies != null) { transparencies[face] = (byte) (255 - alpha); }
         short[] unlit = m.getUnlitFaceColors();
