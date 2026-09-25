@@ -29,16 +29,16 @@ final class BetterNpcSource
 {
     private final Client client;
     private final BetterNpcView view;
+    private final SceneShapeRenderer renderer;
 
     @Inject
-    BetterNpcSource(Client client, BetterNpcView view) { this.client = client; this.view = view; }
+    BetterNpcSource(Client client, BetterNpcView view, SceneShapeRenderer renderer)
+    { this.client = client; this.view = view; this.renderer = renderer; }
 
     static String key(NPC npc, String style) { return "bnh:" + npc.getIndex() + ":" + style; }
 
     static String respawnKey(int npcIndex) { return "bnh:respawn:" + npcIndex; }
 
-
-    /** The clickbox drawn last frame per NPC, for the hover test. */
 
     void collect(List<Marker> tiles, List<ModelTarget> models)
     {
@@ -135,12 +135,17 @@ final class BetterNpcSource
         });
     }
 
-    /** Whether the mouse is over the NPC's clickbox; computed only with the mouse within 300 pixels of the NPC. */
+    /**
+     * Whether the mouse is over the NPC's clickbox: the one the scene drew last frame, else RuneLite's, computed only
+     * with the mouse within 300 pixels of the NPC.
+     */
     private boolean hovered(NPC npc)
     {
         net.runelite.api.Point mouse = client.getMouseCanvasPosition();
         LocalPoint lp = npc.getLocalLocation();
         if (mouse == null || mouse.getX() < 0 || lp == null) { return false; }
+        List<float[]> drawn = renderer.lastClickbox(npc);
+        if (drawn != null) { return FloatClickbox.contains(drawn, mouse.getX(), mouse.getY()); }
         net.runelite.api.Point base = Perspective.localToCanvas(client, lp, npc.getWorldView().getPlane());
         if (base == null || Math.abs(base.getX() - mouse.getX()) > 300 || Math.abs(base.getY() - mouse.getY()) > 300) { return false; }
         Shape clickbox = clickbox(npc);

@@ -22,6 +22,14 @@ public class FloatClickboxTest
         return out;
     }
 
+    @Test public void containsIsEvenOddOverAllPolygons()
+    {
+        List<float[]> box = Arrays.asList(new float[]{0, 0, 10, 0, 10, 10, 0, 10}, new float[]{3, 3, 3, 7, 7, 7, 7, 3});
+        assertTrue(FloatClickbox.contains(box, 1, 1));
+        assertFalse(FloatClickbox.contains(box, 5, 5));
+        assertFalse(FloatClickbox.contains(box, 11, 5));
+    }
+
     /** The union is RuneLite's RectangleUnion, polygon for polygon and corner for corner. */
     @Test public void unionMatchesRuneLite()
     {

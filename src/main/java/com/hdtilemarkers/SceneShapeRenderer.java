@@ -43,11 +43,13 @@ final class SceneShapeRenderer
     private int frame;
     /** New outline traces per frame are limited to this much time; the rest are drawn as hulls. */
     private static final long OUTLINE_BUDGET_NANOS = 2_500_000;
-    private long outlineNanos, clickboxNanos;
+    private long outlineNanos, clickboxNanos, newModelNanos;
 
     /** Diagnostics: this frame's time tracing outlines and making clickboxes. */
     long outlineNanos() { return outlineNanos; }
     long clickboxNanos() { return clickboxNanos; }
+    /** Diagnostics: this frame's time making models for scene objects (none spare), prewarm included. */
+    long newModelNanos() { return newModelNanos; }
     /** Models no scene object uses now, kept for the next ones: making and uploading a model costs. */
     private final java.util.Deque<Spare> spareCarriers = new ArrayDeque<>();
 
@@ -67,7 +69,30 @@ final class SceneShapeRenderer
         Spare spare = b.release();
         if (spare != null && spareCarriers.size() < MAX_SPARES) { spareCarriers.addLast(spare); }
     }
-    private static final int MAX_SPARES = 64;
+    /** Many tagged NPCs take more objects than 64: after a teleport the rest were all made anew in one frame. */
+    private static final int MAX_SPARES = 256;
+    /** Spares made ahead while logging in (see prewarm): half for tiles, half for hulls, clickboxes and outlines. */
+    private static final int PREWARM = 64;
+
+    /**
+     * Makes spare models ahead, in frames that draw nothing yet (logging in), at most budgetNanos per frame: every
+     * object of the first frame that drew needed one, all made in that frame. Normals as begin sets them.
+     */
+    void prewarm(long budgetNanos)
+    {
+        long start = System.nanoTime();
+        while (spareCarriers.size() < PREWARM && System.nanoTime() - start < budgetNanos)
+        {
+            boolean small = spareCarriers.size() % 2 == 0;
+            int radius = small ? MIN_RADIUS : 768;
+            Model created = small ? carriers.create(MIN_VERTICES, MIN_FACES, radius, true) : carriers.create(512, 768, radius, true);
+            if (created == null) { break; }
+            carriersCreated++;
+            FlatModel.normals(created, 0, -1, 0);
+            spareCarriers.addLast(new Spare(created, radius, 0, 6));
+        }
+        newModelNanos = System.nanoTime() - start;
+    }
 
     /** Frame-local owned data: actor mesh arrays can be overwritten by another getModel(). */
     private static final class Projection
@@ -199,6 +224,7 @@ final class SceneShapeRenderer
         frame++;
         outlineNanos = 0;
         clickboxNanos = 0;
+        newModelNanos = 0;
         playerCutNanos = 0;
         playerCut = null;
         playerPending = false;
@@ -1057,7 +1083,9 @@ final class SceneShapeRenderer
             else
             {
                 int radius = b.xray ? MAX_RADIUS : Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, (int) Math.ceil(extent * 1.5f)));
+                long start = System.nanoTime();
                 Model created = carriers.create(Math.max(MIN_VERTICES, b.vertices * 2), Math.max(MIN_FACES, b.faces * 2), radius, true);
+                newModelNanos += System.nanoTime() - start;
                 carriersCreated++;
                 if (created == null) { return false; }
                 // Normals point straight up on every carrier: set once (see begin).
@@ -1203,6 +1231,16 @@ final class SceneShapeRenderer
 
     /** As clear, and the models are dropped too. */
     void reset() { clear(); spareCarriers.clear(); carriers.reset(); }
+
+    /**
+     * The clickbox drawn last frame for this NPC, canvas polygons (even-odd), or null when none was made from its
+     * projection: RuneLite's own (Perspective.getClickbox) fetched the NPC's model again and was costly.
+     */
+    List<float[]> lastClickbox(NPC npc)
+    {
+        Projection p = projections.get(npc);
+        return p == null ? null : p.clickbox;
+    }
 
     /** Diagnostics: carrier models created so far. */
     int carriersCreated() { return carriersCreated; }

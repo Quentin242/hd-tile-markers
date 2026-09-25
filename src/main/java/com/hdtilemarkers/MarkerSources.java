@@ -83,10 +83,35 @@ final class MarkerSources
     void rebuild()
     {
         clear();
-        // NPC Indicators' list, as its getHighlights(): Tag-All adds names here.
+        readNpcHighlights();
+        visit(client.getTopLevelWorldView());
+    }
+
+    /** NPC Indicators' list, as its getHighlights(): Tag-All adds names here. */
+    private void readNpcHighlights()
+    {
         String list = configs.getConfiguration(NpcIndicatorsConfig.GROUP, "npcToHighlight");
         npcHighlights = list == null || list.isEmpty() ? Collections.emptyList() : Text.fromCSV(list);
-        visit(client.getTopLevelWorldView());
+    }
+
+    /**
+     * A change of NPC Indicators' settings (a tag, its list, a style or colour): only its NPCs are matched again. A full
+     * rebuild scanned the whole scene and dropped every shape the renderer kept, for each NPC tagged.
+     */
+    void refreshNpcs()
+    {
+        styles.clear();
+        colors.clear();
+        readNpcHighlights();
+        npcs.clear();
+        refreshNpcs(client.getTopLevelWorldView());
+    }
+
+    private void refreshNpcs(WorldView wv)
+    {
+        if (wv == null) { return; }
+        for (NPC npc : wv.npcs()) { add(npc); }
+        for (WorldView child : wv.worldViews()) { refreshNpcs(child); }
     }
 
     private void visit(WorldView wv)
@@ -426,7 +451,7 @@ final class MarkerSources
 
     /**
      * NPC Indicators' per-NPC style and colour, looked up once per NPC id: they are read several times
-     * per frame. A change of its settings rebuilds the sources, which clears these.
+     * per frame. A change of its settings clears these (refreshNpcs).
      */
     private final Map<Integer, Optional<String>> styles = new HashMap<>();
     private final Map<Integer, Color> colors = new HashMap<>();

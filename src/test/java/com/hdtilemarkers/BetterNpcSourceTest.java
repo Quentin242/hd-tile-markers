@@ -52,7 +52,7 @@ public class BetterNpcSourceTest
             for (String style : styles) { v.accept(info, style); }
             return null;
         }).when(view).visit(any());
-        source = new BetterNpcSource(client, view);
+        source = new BetterNpcSource(client, view, new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace()));
     }
 
     @Test public void tilesFollowTheOriginalPositionsAndColors()

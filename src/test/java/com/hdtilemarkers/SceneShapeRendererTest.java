@@ -101,6 +101,19 @@ public class SceneShapeRendererTest
         verify(seed, never()).translate(anyInt(), anyInt(), anyInt());
     }
 
+    @Test public void modelsMadeAheadServeTheFirstFrame()
+    {
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        renderer.prewarm(1_000_000_000L);
+        int made = renderer.carriersCreated();
+        assertTrue(made > 0);
+        Marker m = new Marker("t", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, new Color(0, 0, 0, 50), 2, null, true);
+        renderer.begin(CAMERA, 1, null, 0);
+        assertTrue(renderer.tile(m));
+        assertTrue(renderer.end());
+        assertEquals(made, renderer.carriersCreated());
+    }
+
     @Test public void tileKeepsScreenPositionAndSitsAboveTerrain()
     {
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());

@@ -29,6 +29,21 @@ final class FloatClickbox
 
     private FloatClickbox() { }
 
+    /** Whether the point lies inside the polygons {x0, y0, ...}, even-odd over all of them as RuneLite fills them. */
+    static boolean contains(List<float[]> polygons, float px, float py)
+    {
+        boolean inside = false;
+        for (float[] p : polygons)
+        {
+            for (int i = 0, n = p.length / 2, j = n - 1; i < n; j = i++)
+            {
+                float xi = p[i * 2], yi = p[i * 2 + 1], xj = p[j * 2], yj = p[j * 2 + 1];
+                if ((yi > py) != (yj > py) && px < (xj - xi) * (py - yi) / (yj - yi) + xi) { inside = !inside; }
+            }
+        }
+        return inside;
+    }
+
     /**
      * The clickbox polygons {x0, y0, x1, y1, ...} from projected vertices (NaN: not projected) and faces, hidden faces
      * left out, clipped to the convex polygon bounds {x0, y0, ...} when given; faces entirely outside the viewport are

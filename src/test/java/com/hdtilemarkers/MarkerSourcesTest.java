@@ -114,6 +114,31 @@ public class MarkerSourcesTest
         sources.remove(npc); assertTrue(collect().isEmpty());
     }
 
+    @Test public void taggingMatchesTheSceneNpcsAgainWithoutRebuilding()
+    {
+        when(config.getConfiguration(NpcIndicatorsConfig.GROUP, "npcToHighlight")).thenReturn("giant");
+        sources.rebuild();
+        NPC npc = mock(NPC.class);
+        when(npc.getName()).thenReturn("Cow"); when(npc.getWorldView()).thenReturn(wv);
+        when(npc.getWorldLocation()).thenReturn(new WorldPoint(3210, 3210, 0));
+        NPCComposition composition = mock(NPCComposition.class);
+        when(composition.getSize()).thenReturn(1); when(npc.getTransformedComposition()).thenReturn(composition);
+        when(config.getConfig(NpcIndicatorsConfig.class).highlightTrueTile()).thenReturn(true);
+        IndexedObjectSet<NPC> npcs = mock(IndexedObjectSet.class);
+        when(npcs.iterator()).thenAnswer(i -> Collections.singletonList(npc).iterator());
+        doReturn(npcs).when(wv).npcs();
+        sources.add(npc);
+        assertTrue(collect().isEmpty());
+        // Tag-All on the cow: its name joins the list and only the NPCs are matched again.
+        when(config.getConfiguration(NpcIndicatorsConfig.GROUP, "npcToHighlight")).thenReturn("giant,Cow");
+        sources.refreshNpcs();
+        assertEquals(1, collect().size());
+        verify(wv, times(1)).getScene();
+        when(config.getConfiguration(NpcIndicatorsConfig.GROUP, "npcToHighlight")).thenReturn("giant");
+        sources.refreshNpcs();
+        assertTrue(collect().isEmpty());
+    }
+
     @Test public void objectMarkersPointsKeepTheirOwnStyleAndColor()
     {
         when(config.getConfiguration(ObjectMarkerSource.GROUP, "region_12850")).thenReturn(

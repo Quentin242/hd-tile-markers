@@ -458,6 +458,8 @@ public class HdTileMarkersPlugin extends Plugin
      * while logged in draws at once.
      */
     private int ticksSinceLogin = Integer.MAX_VALUE;
+    /** Time per frame for making models ahead while logging in. */
+    private static final long PREWARM_NANOS = 3_000_000;
     /** Logging in, until logged in: a login may pass through LOADING first. */
     private boolean loggingIn;
 
@@ -472,6 +474,7 @@ public class HdTileMarkersPlugin extends Plugin
                 times.add("scene", System.nanoTime() - start);
                 times.add("outlines", renderer.outlineNanos());
                 times.add("clickboxes", renderer.clickboxNanos());
+                times.add("new models", renderer.newModelNanos());
                 times.add("player cut", renderer.playerCutNanos());
                 String report = times.frame(markers.size() + " tiles, " + modelTargets.size() + " models" + identifiedStatus() + renderer.leftOut());
                 if (report != null) { log.info(report); renderer.resetLeftOut(); }
@@ -497,7 +500,14 @@ public class HdTileMarkersPlugin extends Plugin
     private void renderScene()
     {
         if (!running || dirty || client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null) { return; }
-        if (ticksSinceLogin < 1) { renderer.clear(); sceneReady = false; return; }
+        if (ticksSinceLogin < 1)
+        {
+            renderer.clear();
+            sceneReady = false;
+            // Nothing is drawn yet: the scene objects' models are made now, a few per frame, not all in the first frame.
+            if (client.isGpu() && !failed) { renderer.prewarm(PREWARM_NANOS); }
+            return;
+        }
         if (!client.isGpu() || failed)
         {
             renderer.clear();
@@ -890,8 +900,15 @@ public class HdTileMarkersPlugin extends Plugin
         if (group.equals(TilePackSource.DATA_GROUP) || group.equals(TilePackSource.SETTINGS_GROUP)) { tilePacks.clear(); }
         if (group.equals(ObjectMarkerSource.GROUP)) { objectMarkers.clearPoints(); }
         if (group.equals("groundMarker") || group.equals(TilePackSource.DATA_GROUP) || group.equals(TilePackSource.SETTINGS_GROUP)
-            || group.equals(ObjectMarkerSource.GROUP) || group.equals(net.runelite.client.plugins.npchighlight.NpcIndicatorsConfig.GROUP))
+            || group.equals(ObjectMarkerSource.GROUP))
         { dirty = true; failed = false; lastRebuild = group + "." + e.getKey(); }
+        // NPC Indicators (a tag, Tag-All, its styles): only its NPCs are matched again, the shapes drawn so far are kept.
+        // A full rebuild per tag made the renderer start over, the stall of the first frames after a scene load each time.
+        if (group.equals(net.runelite.client.plugins.npchighlight.NpcIndicatorsConfig.GROUP))
+        {
+            failed = false;
+            clientThread.invokeLater(() -> { if (running && !dirty) { sources.refreshNpcs(); } });
+        }
     }
     @Subscribe public void onGameTick(GameTick e) { if (ticksSinceLogin < Integer.MAX_VALUE) { ticksSinceLogin++; } }
     @Subscribe public void onHitsplatApplied(HitsplatApplied e) { sources.hitsplat(e.getActor(), System.currentTimeMillis()); }
