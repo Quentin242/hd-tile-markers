@@ -9,16 +9,20 @@ final class Marker
     static final Color NO_FILL = new Color(0, 0, 0, 0);
 
     /*
-     * Depth layers, low to high: NPC highlights at the bottom, your own marks above them,
+     * The ranking of overlapping marks, low to high: where they overlap a higher layer is always drawn over a lower
+     * one, and within a layer the later drawn over the earlier (SceneShapeRenderer keeps every scene object's faces
+     * in this order). NPC highlights at the bottom, paths and other plugins' tiles above them, then your own marks,
      * and your tile indicators on top. Hulls, clickboxes and outlines use SceneShapeRenderer.HULL_LAYER.
      */
     /** NPC tile styles: tile, true tile, south-west tile, south-west true tile (+0..3). */
     static final int NPC_TILE = 1;
-    static final int RESPAWN = 5, PATH_HOVER = 6, PATH_ACTIVE = 7, GROUND = 8, OBJECT = 9, SAILING = 10, HOVER = 11;
-    /** Tiles other plugins send (ExternalMarks): with the saved ground marks. */
-    static final int EXTERNAL = GROUND;
-    /** NPC Aggression Timer's area lines: with the saved ground marks. */
-    static final int AGGRO_AREA = GROUND;
+    static final int RESPAWN = 5, PATH_HOVER = 6, PATH_ACTIVE = 7;
+    /** Tiles other plugins send (ExternalMarks, Shortest Path, captured overlays): above Path Marker's path. */
+    static final int EXTERNAL = 8;
+    /** NPC Aggression Timer's area lines: with other plugins' tiles. */
+    static final int AGGRO_AREA = EXTERNAL;
+    /** Saved ground marks and tile packs, then object marks (OBJECT + 1: Rooftop Agility Improved's), Sailing, hover. */
+    static final int GROUND = 9, OBJECT = 10, SAILING = 12, HOVER = 13;
     static final int DESTINATION = SceneShapeRenderer.HULL_LAYER + 2, CURRENT = SceneShapeRenderer.HULL_LAYER + 3;
 
     final String key;

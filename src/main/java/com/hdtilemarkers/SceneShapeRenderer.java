@@ -33,6 +33,8 @@ final class SceneShapeRenderer
     private final CarrierModels carriers;
     private final RenderTrace trace;
     private final Map<Long, Bucket> buckets = new HashMap<>();
+    /** This frame's shapes per bucket key (without part), split over the buckets in rank order in end(). */
+    private final Map<Long, Stage> stages = new HashMap<>();
     private final Set<String> appended = new HashSet<>();
     /**
      * Projections per NPC or object renderable, kept across frames so their arrays are reused.
@@ -177,14 +179,29 @@ final class SceneShapeRenderer
     private boolean[] playerHidden = new boolean[0];
     private LocalPoint xrayAnchor;
     private int xrayLevel, xrayHeight;
-    private static final float XRAY_NEAR = 200, XRAY_SCALE = 0.03f;
+    /**
+     * Depth of the top layer's through-walls points. 117 HD draws see-through faces without writing depth, sorted
+     * by their distance in whole units (ties in face order), and fully opaque faces apart, before them, with depth
+     * test and writes. It sorts with the client's integer camera, while the marks follow the exact camera: moving,
+     * the two differ by up to about a unit. Each lower layer (a white layer is half of one) sits XRAY_LAYER_DEPTH
+     * farther, well beyond that, so both passes keep the ranking whatever the camera does; within a layer the face
+     * order (see end) decides.
+     */
+    private static final float XRAY_DEPTH = 200.5f;
+    private static final float XRAY_LAYER_DEPTH = 6, XRAY_TOP_LAYER = 20;
+    /**
+     * Objects of one bucket key sit at the same place, so the renderer's order among them (by distance to the
+     * camera) is undecided: each object with higher ranks after it hangs this much lower, thus farther away. At the
+     * camera's height a few units were a tie once 117 HD rounds the camera to whole units.
+     */
+    private static final int PART_STEP = 32;
     /**
      * Nearest depth of a through-walls vertex: the GPU plugin skips a see-through model whole if any vertex is
      * nearer than 50 (ModelUploader.uploadSortedModel), with its own camera, which may differ slightly.
      */
     private static final float XRAY_MIN_DEPTH = ModelShapes.NEAR + 30;
-    /** Depth taken by the layer bias (0.25 per layer, up to HULL_LAYER + 3 = 15 and a white layer), above XRAY_MIN_DEPTH. */
-    private static final float XRAY_LAYER_SPAN = 4f;
+    /** Depth taken by the layer bias (0.25 per layer, up to HULL_LAYER + 3 = 17 and a white layer), above XRAY_MIN_DEPTH. */
+    private static final float XRAY_LAYER_SPAN = 4.5f;
     /*
      * The GPU plugin draws nothing of a see-through model whose diameter is 6000 or more
      * (ModelUploader.uploadSortedModel; Zone.renderAlpha likewise). Carrier bounds are six extreme
@@ -201,7 +218,7 @@ final class SceneShapeRenderer
      */
     private static final int XRAY_CAMERA = XRAY_REACH - 700;
     private float[] tx = new float[64], ty = new float[64], tz = new float[64];
-    static final int HULL_LAYER = 12;
+    static final int HULL_LAYER = 14;
 
     @Inject
     SceneShapeRenderer(Client client, CarrierModels carriers, RenderTrace trace) { this.client = client; this.carriers = carriers; this.trace = trace; }
@@ -230,6 +247,7 @@ final class SceneShapeRenderer
         playerPending = false;
         unavailable = false;
         for (Bucket b : buckets.values()) { b.vertices = 0; b.faces = 0; }
+        for (Stage s : stages.values()) { s.vertices = 0; s.faces = 0; s.count = 0; }
         // Normals point straight up (model y is down): 117 HD, which uses them because faces are not
         // marked flat (see FlatModel.paint), then lights every mark like flat ground seen from above,
         // the same from every camera angle.
@@ -627,8 +645,8 @@ final class SceneShapeRenderer
     }
 
     /**
-     * Appends the current outline to the bucket of the anchor's tile, in world
-     * coordinates. The scene object is written once per bucket in end().
+     * Appends the current outline to the stage of the anchor's tile, in world coordinates. The stages are split
+     * over scene objects in rank order and written once per object in end().
      */
     private boolean draw(String key, LocalPoint anchor, int level, int anchorHeight, Color border, Color fill, boolean hasBorder)
     {
@@ -689,24 +707,19 @@ final class SceneShapeRenderer
                 throughWalls ? XRAY_REACH - 200 : MAX_RADIUS - 300)) { outOfReach++; return false; }
         // Through-walls shapes get their own buckets: they are moved to the camera, others are not.
         long base = ((long) level << 32) | ((long) tileX << 16) | tileY | (throughWalls ? 1L << 40 : 0) | (shared ? 1L << 39 : 0);
-        // A full bucket continues in another object on the same tile, so no model exceeds the renderer's limits.
-        Bucket b = null;
-        for (long part = 0; ; part++)
-        {
-            long id = base | (part << 41);
-            b = buckets.get(id);
-            if (b == null) { b = new Bucket(tileX, tileY, level, anchor.getWorldView()); buckets.put(id, b); break; }
-            if (carriers.fits(b.vertices + addVertices, b.faces + addFaces)) { break; }
-        }
-        b.ensure(b.vertices + addVertices, b.faces + addFaces);
-        b.xray = throughWalls;
-        b.shared = shared;
-        append(b, layer, borderHsl, borderAlpha, fillHsl, fillAlpha);
+        Stage st = stages.get(base);
+        if (st == null) { st = new Stage(tileX, tileY, level, anchor.getWorldView()); stages.put(base, st); }
+        st.ensure(st.vertices + addVertices, st.faces + addFaces);
+        st.xray = throughWalls;
+        st.shared = shared;
+        st.begin(layer);
+        append(st, layer, borderHsl, borderAlpha, fillHsl, fillAlpha);
         if (white)
         {
             if (!throughWalls) { place(false, true); }
-            append(b, layer + 0.5f, FlatModel.WHITE, borderWhite, FlatModel.WHITE, fillWhite);
+            append(st, layer + 0.5f, FlatModel.WHITE, borderWhite, FlatModel.WHITE, fillWhite);
         }
+        st.end();
         appended.add(key);
         return true;
     }
@@ -728,8 +741,8 @@ final class SceneShapeRenderer
         }
     }
 
-    /** Adds the outline's vertices (tx, ty, tz) and its visible faces to the bucket. */
-    private void append(Bucket b, float vertexLayer, int borderHsl, int borderAlpha, int fillHsl, int fillAlpha)
+    /** Adds the outline's vertices (tx, ty, tz) and its visible faces to the stage. */
+    private void append(Stage b, float vertexLayer, int borderHsl, int borderAlpha, int fillHsl, int fillAlpha)
     {
         int first = b.vertices;
         for (int i = 0; i < outline.vertices; i++)
@@ -1016,6 +1029,8 @@ final class SceneShapeRenderer
     /** Ends a frame: writes one scene object per tile. Returns false if no carrier model could be made. */
     boolean end()
     {
+        for (Map.Entry<Long, Stage> e : stages.entrySet()) { split(e.getKey(), e.getValue()); }
+        stages.values().removeIf(st -> st.count == 0);
         Iterator<Map.Entry<Long, Bucket>> it = buckets.entrySet().iterator();
         while (it.hasNext())
         {
@@ -1037,6 +1052,48 @@ final class SceneShapeRenderer
         return !unavailable;
     }
 
+    /**
+     * Moves a stage's shapes into its buckets, lowest rank first and in drawn order within a rank, so the faces of
+     * every object, and the objects of the key one after another, run from the bottom rank to the top one. A full
+     * bucket continues in the next object on the same tile, so no model exceeds the renderer's limits.
+     */
+    private void split(long base, Stage st)
+    {
+        if (st.count == 0) { return; }
+        int[] order = st.byRank();
+        int part = 0;
+        Bucket b = part(base, 0, st);
+        for (int k = 0; k < st.count; k++)
+        {
+            int s = order[k] * Stage.FIELDS;
+            int firstVertex = st.shapes[s + 1], nv = st.shapes[s + 2], firstFace = st.shapes[s + 3], nf = st.shapes[s + 4];
+            // Filled to the largest carrier: a second object at the same place is ordered by its anchor alone.
+            if (b.faces > 0 && !carriers.fitsLargest(b.vertices + nv, b.faces + nf)) { b = part(base, ++part, st); }
+            b.ensure(b.vertices + nv, b.faces + nf);
+            int shift = b.vertices - firstVertex;
+            System.arraycopy(st.wx, firstVertex, b.wx, b.vertices, nv); System.arraycopy(st.wy, firstVertex, b.wy, b.vertices, nv);
+            System.arraycopy(st.wz, firstVertex, b.wz, b.vertices, nv); System.arraycopy(st.layer, firstVertex, b.layer, b.vertices, nv);
+            for (int f = firstFace; f < firstFace + nf; f++)
+            {
+                int to = b.faces++;
+                b.fa[to] = st.fa[f] + shift; b.fb[to] = st.fb[f] + shift; b.fc[to] = st.fc[f] + shift;
+                b.color[to] = st.color[f]; b.alpha[to] = st.alpha[f];
+            }
+            b.vertices += nv;
+        }
+        for (int p = 0; p <= part; p++) { buckets.get(base | ((long) p << 41)).partsAfter = part - p; }
+    }
+
+    private Bucket part(long base, int part, Stage st)
+    {
+        long id = base | ((long) part << 41);
+        Bucket b = buckets.get(id);
+        if (b == null) { b = new Bucket(st.tileX, st.tileY, st.level, st.worldView); buckets.put(id, b); }
+        b.xray = st.xray;
+        b.shared = st.shared;
+        return b;
+    }
+
     private boolean write(Bucket b)
     {
         int anchorX = b.tileX * 128 + 64, anchorY = b.tileY * 128 + 64, anchorZ;
@@ -1052,6 +1109,8 @@ final class SceneShapeRenderer
             for (int i = 0; i < b.vertices; i++) { z += b.wz[i]; }
             anchorZ = Math.round(z / b.vertices);
         }
+        // Below the objects with higher ranks at the same place (the camera is above): farther, so drawn before them.
+        anchorZ += b.partsAfter * PART_STEP;
         // Through walls: the geometry is pulled towards the camera, at most XRAY_REACH from the anchor.
         float extent = b.xray ? XRAY_REACH + 16 : 0;
         for (int i = 0; i < b.vertices && !b.xray; i++)
@@ -1075,6 +1134,17 @@ final class SceneShapeRenderer
                     && (spare == null || candidate.model.getVerticesCount() < spare.model.getVerticesCount()))
                 { spare = candidate; }
             }
+            // Filled close to the largest carrier (see split), no model has room to grow: one that fits will do.
+            if (spare == null)
+            {
+                for (Spare candidate : spareCarriers)
+                {
+                    if (candidate.radius >= wantRadius && candidate.model.getVerticesCount() >= b.vertices
+                        && candidate.model.getFaceCount() >= b.faces
+                        && (spare == null || candidate.model.getVerticesCount() < spare.model.getVerticesCount()))
+                    { spare = candidate; }
+                }
+            }
             if (spare != null)
             {
                 spareCarriers.remove(spare);
@@ -1084,7 +1154,10 @@ final class SceneShapeRenderer
             {
                 int radius = b.xray ? MAX_RADIUS : Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, (int) Math.ceil(extent * 1.5f)));
                 long start = System.nanoTime();
-                Model created = carriers.create(Math.max(MIN_VERTICES, b.vertices * 2), Math.max(MIN_FACES, b.faces * 2), radius, true);
+                // Twice the room where that fits a carrier; an object filled past that (see split) gets what it holds.
+                boolean roomy = carriers.fits(b.vertices, b.faces);
+                Model created = carriers.create(Math.max(MIN_VERTICES, roomy ? b.vertices * 2 : b.vertices),
+                    Math.max(MIN_FACES, roomy ? b.faces * 2 : b.faces), radius, true);
                 newModelNanos += System.nanoTime() - start;
                 carriersCreated++;
                 if (created == null) { return false; }
@@ -1224,6 +1297,7 @@ final class SceneShapeRenderer
     {
         for (Bucket b : buckets.values()) { retire(b); }
         buckets.clear();
+        stages.clear();
         silhouetteScratch.bits = new long[0];
         projections.clear();
         appended.clear();
@@ -1245,6 +1319,72 @@ final class SceneShapeRenderer
     /** Diagnostics: carrier models created so far. */
     int carriersCreated() { return carriersCreated; }
 
+    /** One frame's shapes of a bucket key as they are drawn, each shape a block of vertices and faces with its rank. */
+    private static final class Stage
+    {
+        /** Per shape: rank, first vertex, vertices, first face, faces. */
+        static final int FIELDS = 5;
+        /** Ranks are layers, counted into this many slots; anything outside goes to the nearest one. */
+        private static final int RANKS = 64;
+        final int tileX, tileY, level, worldView;
+        float[] wx = new float[64], wy = new float[64], wz = new float[64];
+        float[] layer = new float[64];
+        int[] fa = new int[96], fb = new int[96], fc = new int[96], color = new int[96], alpha = new int[96];
+        int vertices, faces, count;
+        boolean xray, shared;
+        int[] shapes = new int[FIELDS * 16];
+        private int[] order = new int[16];
+        private final int[] slots = new int[RANKS + 1];
+
+        Stage(int tileX, int tileY, int level, int worldView)
+        { this.tileX = tileX; this.tileY = tileY; this.level = level; this.worldView = worldView; }
+
+        void ensure(int vertexCount, int faceCount)
+        {
+            if (wx.length < vertexCount)
+            {
+                int n = vertexCount * 2;
+                wx = Arrays.copyOf(wx, n); wy = Arrays.copyOf(wy, n); wz = Arrays.copyOf(wz, n);
+                layer = Arrays.copyOf(layer, n);
+            }
+            if (fa.length < faceCount)
+            {
+                int n = faceCount * 2;
+                fa = Arrays.copyOf(fa, n); fb = Arrays.copyOf(fb, n); fc = Arrays.copyOf(fc, n);
+                color = Arrays.copyOf(color, n); alpha = Arrays.copyOf(alpha, n);
+            }
+        }
+
+        /** Starts a shape of the given layer: what is appended until end() belongs to it. */
+        void begin(int rank)
+        {
+            if (shapes.length < (count + 1) * FIELDS) { shapes = Arrays.copyOf(shapes, shapes.length * 2); }
+            int s = count * FIELDS;
+            shapes[s] = Math.max(0, Math.min(RANKS - 1, rank));
+            shapes[s + 1] = vertices;
+            shapes[s + 3] = faces;
+        }
+
+        void end()
+        {
+            int s = count * FIELDS;
+            shapes[s + 2] = vertices - shapes[s + 1];
+            shapes[s + 4] = faces - shapes[s + 3];
+            count++;
+        }
+
+        /** Shape indices by rank, in drawn order within a rank (a counting sort: stable, no garbage). */
+        int[] byRank()
+        {
+            if (order.length < count) { order = new int[count * 2]; }
+            Arrays.fill(slots, 0);
+            for (int k = 0; k < count; k++) { slots[shapes[k * FIELDS] + 1]++; }
+            for (int r = 0; r < RANKS; r++) { slots[r + 1] += slots[r]; }
+            for (int k = 0; k < count; k++) { order[slots[shapes[k * FIELDS]]++] = k; }
+            return order;
+        }
+    }
+
     /** All shapes of one tile and level, merged into one scene object. */
     private final class Bucket extends RuneLiteObjectController
     {
@@ -1256,6 +1396,8 @@ final class SceneShapeRenderer
         int[] fa = new int[96], fb = new int[96], fc = new int[96], color = new int[96], alpha = new int[96];
         boolean xray, shared;
         int anchorX, anchorY, anchorZ;
+        /** Objects after this one with the same bucket key, holding higher ranks (see split). */
+        int partsAfter;
 
         /**
          * What the renderer may read while HD Tile Markers writes the next frame: getModel() can run
@@ -1292,7 +1434,7 @@ final class SceneShapeRenderer
 
         /**
          * Moves every vertex along its view ray to just in front of the camera, keeping
-         * its screen position; farther tiles stay behind nearer ones, higher layers in front.
+         * its screen position: one depth per layer, higher layers in front (see XRAY_DEPTH).
          */
         synchronized void pullToCamera(ModelShapes.Camera cam)
         {
@@ -1305,8 +1447,9 @@ final class SceneShapeRenderer
                 float bias = fl[i] * 0.25f;
                 // The floor keeps the layer order (and the white layer in front) where the depth is clamped.
                 float floor = XRAY_MIN_DEPTH + XRAY_LAYER_SPAN - bias;
-                float at = Math.max(floor, XRAY_NEAR + p[2] * XRAY_SCALE - bias);
-                at = Math.max(floor, withinReach(cam, fx[i], fy[i], fz[i], p[2], at, bias));
+                // One depth per layer, higher layers nearer (see XRAY_DEPTH): the ranking, not the ground, decides.
+                float rank = Math.max(0, Math.min(XRAY_TOP_LAYER, fl[i]));
+                float at = Math.max(floor, withinReach(cam, fx[i], fy[i], fz[i], p[2], XRAY_DEPTH + (XRAY_TOP_LAYER - rank) * XRAY_LAYER_DEPTH, bias));
                 cam.unproject(p[0], p[1], at, p);
                 vx[i] = p[0] - fAnchorX;
                 vy[i] = p[2] - fAnchorZ;

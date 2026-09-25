@@ -375,6 +375,89 @@ public class SceneShapeRendererTest
         assertTrue(cornerFound);
     }
 
+    @Test public void overlappingMarksThroughWallsAreDrawnInRankOrder()
+    {
+        // 117 HD draws see-through faces without writing depth, by distance and ties in face order: in rank order
+        // and nearer per rank, the higher mark lies on top whatever the camera does, even drawn first.
+        Color top = new Color(0, 255, 0, 120), bottom = new Color(255, 0, 0, 120);
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        renderer.begin(CAMERA, 1, new LocalPoint(1344, 344, -1), 0);
+        Marker current = new Marker("current", new LocalPoint(1344, 1344, -1), 0, 1, 1, Marker.NO_FILL, top, 0, null, false);
+        current.layer = Marker.CURRENT;
+        Marker path = new Marker("path", new LocalPoint(1344, 1344, -1), 0, 3, 1, Marker.NO_FILL, bottom, 0, null, false);
+        path.layer = Marker.EXTERNAL;
+        assertTrue(renderer.tile(current));
+        assertTrue(renderer.tile(path));
+        assertTrue(renderer.end());
+        int[] hsl = new int[3];
+        FlatModel.layers(top, 120, false, hsl);
+        int topHsl = hsl[0];
+        FlatModel.layers(bottom, 120, false, hsl);
+        int bottomHsl = hsl[0];
+        int[] colors = alphaCarrier.getFaceColors3();
+        int lastBottom = -1, firstTop = Integer.MAX_VALUE;
+        for (int f = 0; f < colors.length; f++)
+        {
+            if (colors[f] == bottomHsl) { lastBottom = f; }
+            if (colors[f] == topHsl) { firstTop = Math.min(firstTop, f); }
+        }
+        assertTrue(lastBottom >= 0 && firstTop < Integer.MAX_VALUE);
+        assertTrue(lastBottom < firstTop);
+        ArgumentCaptor<RuneLiteObjectController> registered = ArgumentCaptor.forClass(RuneLiteObjectController.class);
+        verify(client).registerRuneLiteObject(registered.capture());
+        RuneLiteObjectController o = registered.getValue();
+        float[] vx = alphaCarrier.getVerticesX(), vy = alphaCarrier.getVerticesY(), vz = alphaCarrier.getVerticesZ();
+        int[] i1 = alphaCarrier.getFaceIndices1();
+        // One depth per layer, the higher nearer by far more than 117 HD's integer camera is off while moving: its
+        // see-through sort and its depth test for opaque faces both keep the ranking.
+        float[] p = new float[3];
+        float topDepth = Float.NaN, bottomDepth = Float.NaN;
+        for (int f = 0; f < colors.length; f++)
+        {
+            if (colors[f] != topHsl && colors[f] != bottomHsl) { continue; }
+            int v = i1[f];
+            CAMERA.project(o.getX() + vx[v], o.getY() + vz[v], o.getZ() + vy[v], p);
+            if (colors[f] == topHsl) { topDepth = p[2]; } else { bottomDepth = p[2]; }
+        }
+        assertEquals(200.5f + (20 - Marker.CURRENT) * 6, topDepth, 0.05f);
+        assertEquals(200.5f + (20 - Marker.EXTERNAL) * 6, bottomDepth, 0.05f);
+    }
+
+    @Test public void manyMarksThroughWallsStayInOneSceneObject()
+    {
+        // Carriers sized by their copies of the seed (20 vertices, 30 faces each), as merging really does.
+        when(client.mergeModels(any(ModelData[].class))).thenAnswer(inv -> {
+            int copies = inv.getArguments().length;
+            ModelData merged = mock(ModelData.class), alpha = mock(ModelData.class);
+            when(merged.cloneVertices()).thenReturn(merged);
+            when(merged.cloneColors()).thenReturn(merged);
+            when(merged.cloneTransparencies(true)).thenReturn(alpha);
+            when(alpha.getFaceIndices1()).thenReturn(new int[1]);
+            when(alpha.getFaceIndices2()).thenReturn(new int[1]);
+            when(alpha.getFaceIndices3()).thenReturn(new int[1]);
+            when(alpha.getVerticesX()).thenReturn(new float[1]);
+            Model m = model(20 * copies, 30 * copies, true);
+            when(alpha.light()).thenReturn(m);
+            return merged;
+        });
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        renderer.begin(CAMERA, 1, new LocalPoint(1344, 344, -1), 0);
+        // More than half the largest carrier: one object filled past its usual room to spare, not two.
+        int drawn = 0;
+        for (int x = 0; x < 16; x++)
+        {
+            for (int y = 0; y < 16; y++)
+            {
+                Marker m = new Marker("t" + x + ":" + y, new LocalPoint(320 + x * 128, 704 + y * 128, -1), 0, 1, 1,
+                    Color.RED, new Color(0, 0, 255, 80), 2, null, false);
+                if (renderer.tile(m)) { drawn++; }
+            }
+        }
+        assertTrue(drawn > 100);
+        assertTrue(renderer.end());
+        verify(client, times(1)).registerRuneLiteObject(any(RuneLiteObjectController.class));
+    }
+
     @Test public void noThroughWallsVertexIsNearerThanTheGpuPluginAllows()
     {
         // The GPU plugin skips a see-through model whole if any vertex, used or not, is nearer than 50;

@@ -62,6 +62,16 @@ final class CarrierModels
     }
 
     /**
+     * Whether this much geometry fits the largest carrier at all, without room to spare: used to fill a scene object
+     * before a second one is needed, as their order among each other is up to the renderer.
+     */
+    boolean fitsLargest(int vertices, int faces)
+    {
+        if (!seeded()) { return vertices <= MAX_VERTICES / 2 && faces <= MAX_FACES / 2; }
+        return copies(vertices + 6, faces) <= maxCopies();
+    }
+
+    /**
      * A model with at least the given capacity, every face hidden, and bounds
      * fixed to the given radius around its origin, or null.
      *
