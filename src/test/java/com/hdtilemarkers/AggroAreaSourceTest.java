@@ -26,7 +26,7 @@ public class AggroAreaSourceTest
     @Test public void areaBecomesShortConnectedLines()
     {
         List<Marker> out = new ArrayList<>();
-        AggroAreaSource.lines(square(1280, 1280, 21), new LocalPoint(2560, 2560, -1), 0, Color.YELLOW, -1, out);
+        AggroAreaSource.lines(square(1280, 1280, 21), new LocalPoint(2560, 2560, -1), 0, Color.YELLOW, -1, AggroAreaSource.MAX_LOCAL_DRAW_LENGTH, out);
         int edges = 0;
         for (Marker m : out)
         {
@@ -48,7 +48,7 @@ public class AggroAreaSourceTest
         path.lineTo(1280, 1408);
         path.closePath();
         List<Marker> out = new ArrayList<>();
-        AggroAreaSource.lines(path, new LocalPoint(1344, 1344, -1), 0, Color.YELLOW, -1, out);
+        AggroAreaSource.lines(path, new LocalPoint(1344, 1344, -1), 0, Color.YELLOW, -1, AggroAreaSource.MAX_LOCAL_DRAW_LENGTH, out);
         assertEquals(1, out.size());
         assertEquals(5, out.get(0).lineX.length);
         assertEquals(1280, out.get(0).lineX[4]);
@@ -59,7 +59,7 @@ public class AggroAreaSourceTest
     {
         List<Marker> out = new ArrayList<>();
         // The player stands 30 tiles east of the area: nothing lies within 20 tiles.
-        AggroAreaSource.lines(square(1280, 1280, 5), new LocalPoint(1280 + 35 * 128, 1280, -1), 0, Color.YELLOW, -1, out);
+        AggroAreaSource.lines(square(1280, 1280, 5), new LocalPoint(1280 + 35 * 128, 1280, -1), 0, Color.YELLOW, -1, AggroAreaSource.MAX_LOCAL_DRAW_LENGTH, out);
         assertTrue(out.isEmpty());
     }
 }

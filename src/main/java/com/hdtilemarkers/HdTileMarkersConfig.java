@@ -51,8 +51,17 @@ public interface HdTileMarkersConfig extends Config
     @ConfigItem(keyName = "tilesThroughWalls", name = "Through walls", description = "Draw all marks (tiles, hulls, clickboxes, outlines) in front of walls, objects and characters, like the normal 2D overlays. They then also get the same colour from every angle with 117 HD", position = 3, section = generalSection)
     default boolean tilesThroughWalls() { return true; }
 
+    @ConfigItem(keyName = "charactersInFrontOfTiles", name = "Player in front of marks", description = "With Through walls on, tiles, clickboxes, hulls and outlines leave your character uncovered (its exact outline), so it stands in front of them, while they still show through every wall and object", position = 4, section = generalSection)
+    default boolean charactersInFrontOfTiles() { return true; }
+
     @ConfigItem(keyName = "predictWalk", name = "Predict walk target", description = "After Walk here, show the clicked tile as destination and a predicted path, also when you click beyond the loaded area (such as 117 HD's extended terrain). Beyond it, heights and walls are unknown: the path is a straight line.", position = 2, section = generalSection)
     default boolean predictWalk() { return true; }
+
+    @ConfigItem(keyName = "extendRanges", name = "Extend plugin ranges", description = "Draw the marks of plugins with their own range limit (Agility: about 18 tiles, NPC Aggression Timer: 20 tiles) as far as the draw distance. Off: as far as those plugins draw them themselves. Plugins whose overlay HD Tile Markers runs (Ground Items, Fishing, ...) keep their own range.", position = 5, section = generalSection)
+    default boolean extendRanges() { return false; }
+
+    @ConfigItem(keyName = "ignoreQuestHelperWarning", name = "Ignore Quest Helper notice", description = "Do not show the chat notice when Quest Helper highlights NPCs, objects or ground items as outlines, which HD Tile Markers cannot draw sharp (its convex hull and click box styles it can)", position = 6, section = generalSection)
+    default boolean ignoreQuestHelperWarning() { return false; }
 
     // Ground Markers
 

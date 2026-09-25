@@ -16,6 +16,62 @@ final class FlatModel
 
     static int hsl(Color color) { return JagexColor.rgbToHSL(color.getRGB(), 1.0) & 0xFFFF; }
 
+    /** Packed HSL white: no saturation, full lightness. */
+    static final int WHITE = 127;
+
+    /** WHITE as sRGB, as 117 HD converts it. */
+    private static final float[] WHITE_RGB = rgb(WHITE);
+
+    /**
+     * The colour as up to two layers, written to out as {hsl, alpha, white alpha}. With 117 HD's lightness cap
+     * (SceneShapeRenderer.hdLightnessCap) a colour lighter than the cap allows is drawn as its hue and
+     * saturation at the highest lightness allowed, with white over it at an alpha chosen so that both
+     * together look like the colour at the given alpha. Otherwise one layer: white alpha 0.
+     */
+    static void layers(Color color, int alpha, boolean lightnessCap, int[] out)
+    {
+        int hsl = hsl(color);
+        out[0] = hsl; out[1] = alpha; out[2] = 0;
+        if (!lightnessCap || alpha <= 0) { return; }
+        int max = maxLightness(hsl >> 7 & 7);
+        if ((hsl & 127) <= max) { return; }
+        int capped = (hsl & ~127) | max;
+        // The colour as a mix of the capped colour and white: C = t * W + (1 - t) * P.
+        float[] p = rgb(capped);
+        float cr = color.getRed() / 255f, cg = color.getGreen() / 255f, cb = color.getBlue() / 255f;
+        float num = (cr - p[0]) * (WHITE_RGB[0] - p[0]) + (cg - p[1]) * (WHITE_RGB[1] - p[1]) + (cb - p[2]) * (WHITE_RGB[2] - p[2]);
+        float den = 0;
+        for (int i = 0; i < 3; i++) { den += (WHITE_RGB[i] - p[i]) * (WHITE_RGB[i] - p[i]); }
+        float t = den > 0 ? Math.max(0, Math.min(1, num / den)) : 0;
+        // No white in it (a pure colour just over the cap, such as red): as before, 117 HD caps it itself.
+        if (t <= 0) { return; }
+        // White at alpha a*t over the capped colour at a*(1-t)/(1-a*t) blends like the colour at alpha a.
+        float a = alpha / 255f, whiteAlpha = a * t;
+        float colourAlpha = whiteAlpha >= 1 ? 0 : a * (1 - t) / (1 - whiteAlpha);
+        out[0] = capped; out[1] = Math.round(colourAlpha * 255); out[2] = Math.round(whiteAlpha * 255);
+    }
+
+    /** 117 HD's lightness cap for a saturation (0-7), as its undoVanillaShading. */
+    static int maxLightness(int saturation) { return (int) (127 - 72 * Math.pow(saturation / 7.0, 0.05)); }
+
+    /** Packed HSL as sRGB 0-1, as 117 HD converts it (convertHsl, hslToSrgb). */
+    static float[] rgb(int hsl)
+    {
+        float h = (hsl >> 10 & 63) / 64f + 0.0078125f, s = (hsl >> 7 & 7) / 8f + 0.0625f, l = (hsl & 127) / 128f;
+        float q = l < 0.5f ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+        return new float[]{hue(p, q, h + 1 / 3f), hue(p, q, h), hue(p, q, h - 1 / 3f)};
+    }
+
+    private static float hue(float p, float q, float t)
+    {
+        if (t < 0) { t += 1; }
+        if (t > 1) { t -= 1; }
+        if (t < 1 / 6f) { return p + (q - p) * 6 * t; }
+        if (t < 1 / 2f) { return q; }
+        if (t < 2 / 3f) { return p + (q - p) * (2 / 3f - t) * 6; }
+        return p;
+    }
+
     static void paint(Model m, int face, int hsl, int alpha)
     {
         m.getFaceColors1()[face] = hsl;

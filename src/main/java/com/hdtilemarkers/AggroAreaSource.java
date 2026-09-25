@@ -31,7 +31,7 @@ final class AggroAreaSource
     static final String PLUGIN = "net.runelite.client.plugins.npcunaggroarea.NpcAggroAreaPlugin";
     static final String OVERLAY = "net.runelite.client.plugins.npcunaggroarea.NpcAggroAreaOverlay";
     /** As the overlay: only lines within 20 tiles of the player. */
-    private static final int MAX_LOCAL_DRAW_LENGTH = 20 * Perspective.LOCAL_TILE_SIZE;
+    static final int MAX_LOCAL_DRAW_LENGTH = 20 * Perspective.LOCAL_TILE_SIZE;
     /** Tile edges per scene line, so each piece stays well inside one scene object. */
     private static final int EDGES_PER_LINE = 6;
     /** The overlay's stroke width. */
@@ -40,11 +40,12 @@ final class AggroAreaSource
     private final Client client;
     private final NpcAggroAreaPlugin plugin;
     private final NpcAggroAreaConfig config;
+    private final HdTileMarkersConfig hdConfig;
 
     @Inject
-    AggroAreaSource(Client client, NpcAggroAreaPlugin plugin, ConfigManager configs)
+    AggroAreaSource(Client client, NpcAggroAreaPlugin plugin, ConfigManager configs, HdTileMarkersConfig hdConfig)
     {
-        this.client = client; this.plugin = plugin;
+        this.client = client; this.plugin = plugin; this.hdConfig = hdConfig;
         // Read from ConfigManager, not bound in HD Tile Markers' injector (see BetterNpcView.readConfig).
         config = configs.getConfig(NpcAggroAreaConfig.class);
     }
@@ -64,11 +65,13 @@ final class AggroAreaSource
         Instant end = plugin.getEndTime();
         if (color == null || (end != null && Instant.now().isBefore(end))) { color = config.aggroAreaColor(); }
         if (color == null) { return; }
-        lines(lines, player.getLocalLocation(), plane, color, wv.getId(), out);
+        // Extended: as far as the draw distance instead of the overlay's 20 tiles.
+        int reach = MarkerSources.pluginRange(hdConfig, MAX_LOCAL_DRAW_LENGTH);
+        lines(lines, player.getLocalLocation(), plane, color, wv.getId(), reach, out);
     }
 
     /** Splits the path into short polylines of connected tile edges near the player. */
-    static void lines(GeneralPath path, LocalPoint player, int plane, Color color, int worldView, List<Marker> out)
+    static void lines(GeneralPath path, LocalPoint player, int plane, Color color, int worldView, int reach, List<Marker> out)
     {
         float[] c = new float[6];
         List<int[]> current = new ArrayList<>();
@@ -80,7 +83,7 @@ final class AggroAreaSource
             // A close is a line back to the subpath's start.
             if (type == PathIterator.SEG_CLOSE) { c[0] = startX; c[1] = startY; type = PathIterator.SEG_LINETO; }
             int x = Math.round(c[0]), y = Math.round(c[1]);
-            boolean near = Math.abs(x - player.getX()) <= MAX_LOCAL_DRAW_LENGTH && Math.abs(y - player.getY()) <= MAX_LOCAL_DRAW_LENGTH;
+            boolean near = Math.abs(x - player.getX()) <= reach && Math.abs(y - player.getY()) <= reach;
             int[] last = current.isEmpty() ? null : current.get(current.size() - 1);
             if (last != null && last[0] == x && last[1] == y) { continue; }
             if (type == PathIterator.SEG_LINETO && near && last != null)

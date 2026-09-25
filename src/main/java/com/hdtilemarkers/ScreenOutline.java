@@ -232,4 +232,184 @@ final class ScreenOutline
         else { b[f] = v3; c[f] = v2; }
         return f + 1;
     }
+
+    /** Scratch for cutOut: the piece being split and its two halves, as x, y, depth per point. */
+    private float[] piece = new float[3 * 64], inside = new float[3 * 64], outside = new float[3 * 64], part = new float[3 * 64];
+
+    /**
+     * Takes a convex canvas polygon (hx, hy, n points, either winding) out of the shape: every face is split along
+     * its edges, the parts outside are kept (border faces first, as before) and the part inside is dropped. New points
+     * get their depth interpolated in 1 / depth, as on a plane seen in perspective.
+     */
+    void cutOut(float[] hx, float[] hy, int n)
+    {
+        cut(hx, hy, n, null);
+    }
+
+    /**
+     * Leaves the player uncovered: of every face, what lies outside the cut's box is kept, and inside it only what
+     * lies in its pieces (the box minus the player's silhouette).
+     */
+    void cutOut(PlayerCut cut)
+    {
+        cut(new float[]{cut.minX, cut.maxX, cut.maxX, cut.minX}, new float[]{cut.minY, cut.minY, cut.maxY, cut.maxY}, 4, cut);
+    }
+
+    private void cut(float[] hx, float[] hy, int n, PlayerCut keep)
+    {
+        if (n < 3) { return; }
+        float hMinX = Float.MAX_VALUE, hMinY = Float.MAX_VALUE, hMaxX = -Float.MAX_VALUE, hMaxY = -Float.MAX_VALUE;
+        double area = 0;
+        for (int i = 0; i < n; i++)
+        {
+            int j = (i + 1) % n;
+            area += hx[i] * hy[j] - hx[j] * hy[i];
+            hMinX = Math.min(hMinX, hx[i]); hMaxX = Math.max(hMaxX, hx[i]);
+            hMinY = Math.min(hMinY, hy[i]); hMaxY = Math.max(hMaxY, hy[i]);
+        }
+        if (hMaxX < minX || hMinX > maxX || hMaxY < minY || hMinY > maxY || area == 0) { return; }
+        float sign = area > 0 ? 1 : -1;
+        int[] oa = java.util.Arrays.copyOf(a, faces), ob = java.util.Arrays.copyOf(b, faces), oc = java.util.Arrays.copyOf(c, faces);
+        int oldFaces = faces, oldBorder = borderFaces;
+        faces = 0;
+        for (int f = 0; f < oldFaces; f++)
+        {
+            if (f == oldBorder) { borderFaces = faces; }
+            int v1 = oa[f], v2 = ob[f], v3 = oc[f];
+            float fMinX = Math.min(x[v1], Math.min(x[v2], x[v3])), fMaxX = Math.max(x[v1], Math.max(x[v2], x[v3]));
+            float fMinY = Math.min(y[v1], Math.min(y[v2], y[v3])), fMaxY = Math.max(y[v1], Math.max(y[v2], y[v3]));
+            if (fMaxX <= hMinX || fMinX >= hMaxX || fMaxY <= hMinY || fMinY >= hMaxY) { keep(v1, v2, v3); continue; }
+            int count = 3;
+            ensureScratch(count + n + 2);
+            put(piece, 0, v1); put(piece, 1, v2); put(piece, 2, v3);
+            for (int e = 0; e < n && count >= 3; e++)
+            {
+                // The part outside this edge is outside the polygon: kept. The rest goes on to the next edge.
+                int out = split(piece, count, hx[e], hy[e], hx[(e + 1) % n], hy[(e + 1) % n], sign);
+                if (out >= 3) { emit(outside, out); }
+                float[] swap = piece; piece = inside; inside = swap;
+                count = splitInside;
+            }
+            if (keep == null || count < 3) { continue; }
+            // Inside the box: only the parts in the pieces around the silhouette.
+            float pMinX = Float.MAX_VALUE, pMaxX = -Float.MAX_VALUE, pMinY = Float.MAX_VALUE, pMaxY = -Float.MAX_VALUE;
+            for (int k = 0; k < count; k++)
+            {
+                pMinX = Math.min(pMinX, piece[k * 3]); pMaxX = Math.max(pMaxX, piece[k * 3]);
+                pMinY = Math.min(pMinY, piece[k * 3 + 1]); pMaxY = Math.max(pMaxY, piece[k * 3 + 1]);
+            }
+            for (float[] q : keep.pieces)
+            {
+                if (q[1] >= pMaxY || q[5] <= pMinY || q[8] >= pMaxX || q[9] <= pMinX) { continue; }
+                System.arraycopy(piece, 0, part, 0, count * 3);
+                int m = count;
+                for (int e = 0; e < 4 && m >= 3; e++)
+                {
+                    int ex = e * 2, nx = ((e + 1) % 4) * 2;
+                    // The trapezoid runs clockwise on the canvas (y down): positive area in these coordinates.
+                    split(part, m, q[ex], q[ex + 1], q[nx], q[nx + 1], 1);
+                    float[] swap = part; part = inside; inside = swap;
+                    m = splitInside;
+                }
+                if (m >= 3) { emit(part, m); }
+            }
+        }
+        if (oldBorder >= oldFaces) { borderFaces = faces; }
+    }
+
+    /** Points of the last split's inside part (in inside); the outside part is in outside, its count returned. */
+    private int splitInside;
+
+    /** Splits the polygon src (count points) by the line from (ex, ey) to (fx, fy): inside is left of it for sign 1. */
+    private int split(float[] src, int count, float ex, float ey, float fx, float fy, float sign)
+    {
+        float dx = fx - ex, dy = fy - ey;
+        int in = 0, out = 0;
+        for (int k = 0; k < count; k++)
+        {
+            int l = (k + 1) % count;
+            float sk = sign * (dx * (src[k * 3 + 1] - ey) - dy * (src[k * 3] - ex));
+            float sl = sign * (dx * (src[l * 3 + 1] - ey) - dy * (src[l * 3] - ex));
+            if (sk >= 0) { copy(src, k, inside, in++); } else { copy(src, k, outside, out++); }
+            if ((sk >= 0) != (sl >= 0))
+            {
+                float t = sk / (sk - sl);
+                float d0 = src[k * 3 + 2], d1 = src[l * 3 + 2];
+                float px = src[k * 3] + (src[l * 3] - src[k * 3]) * t;
+                float py = src[k * 3 + 1] + (src[l * 3 + 1] - src[k * 3 + 1]) * t;
+                float pd = 1f / (1f / d0 + (1f / d1 - 1f / d0) * t);
+                set(inside, in++, px, py, pd);
+                set(outside, out++, px, py, pd);
+            }
+        }
+        splitInside = in;
+        return out;
+    }
+
+    /** Room for polygons of up to points points in every scratch array. */
+    private void ensureScratch(int points)
+    {
+        int room = (points + 8) * 3;
+        if (piece.length < room) { piece = java.util.Arrays.copyOf(piece, room * 2); }
+        if (inside.length < room) { inside = new float[room * 2]; }
+        if (outside.length < room) { outside = new float[room * 2]; }
+        if (part.length < room) { part = new float[room * 2]; }
+    }
+
+    private void put(float[] to, int k, int v)
+    {
+        to[k * 3] = x[v]; to[k * 3 + 1] = y[v]; to[k * 3 + 2] = depth[v];
+    }
+
+    private static void copy(float[] from, int k, float[] to, int l)
+    {
+        to[l * 3] = from[k * 3]; to[l * 3 + 1] = from[k * 3 + 1]; to[l * 3 + 2] = from[k * 3 + 2];
+    }
+
+    private static void set(float[] to, int l, float px, float py, float pd)
+    {
+        to[l * 3] = px; to[l * 3 + 1] = py; to[l * 3 + 2] = pd;
+    }
+
+    private void keep(int v1, int v2, int v3)
+    {
+        growFaces(faces + 1);
+        a[faces] = v1; b[faces] = v2; c[faces] = v3;
+        faces++;
+    }
+
+    /** A convex piece as a fan of new vertices. */
+    private void emit(float[] p, int count)
+    {
+        if (x.length < vertices + count)
+        {
+            int size = (vertices + count) * 2;
+            x = java.util.Arrays.copyOf(x, size); y = java.util.Arrays.copyOf(y, size); depth = java.util.Arrays.copyOf(depth, size);
+        }
+        int first = vertices;
+        for (int k = 0; k < count; k++) { x[vertices] = p[k * 3]; y[vertices] = p[k * 3 + 1]; depth[vertices] = p[k * 3 + 2]; vertices++; }
+        growFaces(faces + count - 2);
+        for (int k = 1; k < count - 1; k++) { faces = face(faces, first, first + k, first + k + 1); }
+    }
+
+    private void growFaces(int n)
+    {
+        if (a.length < n)
+        {
+            int size = n * 2;
+            a = java.util.Arrays.copyOf(a, size); b = java.util.Arrays.copyOf(b, size); c = java.util.Arrays.copyOf(c, size);
+        }
+    }
+
+    /** Becomes a copy of another outline (its points, faces and bounds), reusing this one's arrays. */
+    void copyFrom(ScreenOutline o)
+    {
+        if (x.length < o.vertices) { x = new float[o.x.length]; y = new float[o.x.length]; depth = new float[o.x.length]; }
+        if (a.length < o.faces) { a = new int[o.a.length]; b = new int[o.a.length]; c = new int[o.a.length]; }
+        System.arraycopy(o.x, 0, x, 0, o.vertices); System.arraycopy(o.y, 0, y, 0, o.vertices);
+        System.arraycopy(o.depth, 0, depth, 0, o.vertices);
+        System.arraycopy(o.a, 0, a, 0, o.faces); System.arraycopy(o.b, 0, b, 0, o.faces); System.arraycopy(o.c, 0, c, 0, o.faces);
+        vertices = o.vertices; faces = o.faces; borderFaces = o.borderFaces;
+        minX = o.minX; minY = o.minY; maxX = o.maxX; maxY = o.maxY;
+    }
 }

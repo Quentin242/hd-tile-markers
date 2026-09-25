@@ -76,7 +76,11 @@ final class ObjectMarkerSource
         Boolean hull, outline, clickbox, tile;
     }
 
-    void clear() { points.clear(); objects.clear(); valid = true; }
+    /** The marked objects; their saved points stay parsed (per region) until Object Markers' settings change. */
+    void clear() { objects.clear(); }
+
+    /** Object Markers' settings changed: its saved points are read again. */
+    void clearPoints() { points.clear(); valid = true; }
 
     boolean valid() { return valid; }
 
@@ -152,7 +156,8 @@ final class ObjectMarkerSource
     /** Object Markers' checkObjectPoints. */
     void check(TileObject object)
     {
-        if (object == null || object.getPlane() < 0) { return; }
+        // No saved points loaded (as during a scene load, before the rebuild): nothing to match.
+        if (object == null || object.getPlane() < 0 || points.isEmpty()) { return; }
         WorldPoint worldPoint = WorldPoint.fromLocalInstance(client, object.getLocalLocation(), object.getPlane());
         List<ObjectPoint> regionPoints = points.get(worldPoint.getRegionID());
         if (regionPoints == null) { return; }

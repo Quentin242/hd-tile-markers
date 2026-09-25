@@ -172,4 +172,25 @@ public class ModelShapesTest
         }
         return sum / 2;
     }
+
+    /**
+     * A model partly behind the camera: with a partial near distance, those vertices are left out (NaN) and the rest
+     * projected, instead of the whole model failing; their convex hull leaves the missing ones out.
+     */
+    @Test public void partlyBehindTheCameraKeepsTheOtherVertices()
+    {
+        // Looking along +y from (6400, 5000): the first vertex lies behind the camera.
+        ModelShapes.Camera camera = new ModelShapes.Camera(6400, 5000, -600, 0.3f, 0, 600, 0, 0, 1000, 700);
+        float[] vx = {0, -200, 200, 0}, vy = {0, 0, 0, -300}, vz = {0, 0, 0, 0};
+        float[] ox = new float[4], oy = new float[4];
+        assertTrue(Float.isNaN(ModelShapes.projectModel(camera, vx, vy, vz, 4, 6400, 4000, 0, 0, ox, oy)));
+        float depth = ModelShapes.projectModel(camera, new float[]{0, -200, 200, 0}, vy, new float[]{0, 2000, 2000, 2000}, 4,
+            6400, 4000, 0, 0, ox, oy, SceneShapeRenderer.PARTIAL_NEAR);
+        assertFalse(Float.isNaN(depth));
+        assertTrue(Float.isNaN(ox[0]));
+        assertFalse(Float.isNaN(ox[1]) || Float.isNaN(ox[2]) || Float.isNaN(ox[3]));
+        float[] hull = SceneShapeRenderer.hullOf(ox, oy, 4);
+        assertNotNull(hull);
+        assertEquals(3, hull.length / 2);
+    }
 }

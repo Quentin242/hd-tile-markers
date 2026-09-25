@@ -18,6 +18,7 @@ public class AgilitySourceTest
     private AgilityPlugin plugin;
     private AgilityConfig config;
     private AgilitySource source;
+    private HdTileMarkersConfig hdConfig;
     private WorldView wv;
     private final List<Tile> marks = new ArrayList<>();
 
@@ -35,7 +36,8 @@ public class AgilitySourceTest
         when(client.getCameraFocusEntity()).thenReturn(focus);
         when(plugin.getMarksOfGrace()).thenReturn(marks);
         when(plugin.getNpcs()).thenReturn(Collections.emptySet());
-        source = new AgilitySource(client, plugin, configs);
+        hdConfig = mock(HdTileMarkersConfig.class, CALLS_REAL_METHODS);
+        source = new AgilitySource(client, plugin, configs, hdConfig);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
@@ -84,5 +86,37 @@ public class AgilitySourceTest
         assertEquals(config.getMarkColor(), models.get(0).color);
         assertEquals(1, tiles.size());
         assertEquals(config.getMarkColor(), tiles.get(0).color);
+    }
+
+    /** By default obstacles keep the plugin's own 2350 range; with extended ranges, as far as the draw distance. */
+    @Test public void obstaclesFollowTheDrawDistanceWhenExtended()
+    {
+        when(wv.getPlane()).thenReturn(0);
+        GameObject far = obstacle(AgilityObstacles.OBSTACLE_IDS.iterator().next());
+        when(far.getLocalLocation()).thenReturn(new LocalPoint(1344 + 40 * 128, 1344, -1));
+        obstacles(far);
+        List<ModelTarget> models = new ArrayList<>();
+        source.collect(new ArrayList<>(), models);
+        assertTrue(models.isEmpty());
+        doReturn(true).when(hdConfig).extendRanges();
+        source.collect(new ArrayList<>(), models);
+        assertEquals(1, models.size());
+        doReturn(20).when(hdConfig).distance();
+        models.clear();
+        source.collect(new ArrayList<>(), models);
+        assertTrue(models.isEmpty());
+    }
+
+    /** An obstacle Rooftop Agility Improved highlights is left to it: one highlight, not both. */
+    @Test public void obstaclesClaimedByRooftopsAreLeftOut()
+    {
+        when(wv.getPlane()).thenReturn(0);
+        GameObject obstacle = obstacle(AgilityObstacles.OBSTACLE_IDS.iterator().next());
+        obstacles(obstacle);
+        List<ModelTarget> models = new ArrayList<>();
+        source.collect(new ArrayList<>(), models, java.util.Collections.singleton(obstacle), java.util.Collections.emptySet());
+        assertTrue(models.isEmpty());
+        source.collect(new ArrayList<>(), models, java.util.Collections.emptySet(), java.util.Collections.emptySet());
+        assertEquals(1, models.size());
     }
 }

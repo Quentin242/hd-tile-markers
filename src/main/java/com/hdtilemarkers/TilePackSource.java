@@ -109,12 +109,33 @@ final class TilePackSource
         return bundled;
     }
 
+    /**
+     * Packs players made themselves. Tile Packs 2 saves each as its own key, pack_&lt;id&gt; (TilePackManager.loadSavedPacks);
+     * bundled packs have an entry there too, holding only whether they show in its panel, without tiles.
+     * Tile Packs 1 kept them all under customPacks, which is still read for players who did not update.
+     */
     private Map<Integer, TilePack> customPacks()
     {
+        Map<Integer, TilePack> packs = new HashMap<>();
         String json = configs.getConfiguration(DATA_GROUP, "customPacks");
-        if (Strings.isNullOrEmpty(json)) { return Collections.emptyMap(); }
-        Map<Integer, TilePack> packs = gson.fromJson(json, new TypeToken<Map<Integer, TilePack>>() { }.getType());
-        return packs == null ? Collections.emptyMap() : packs;
+        if (!Strings.isNullOrEmpty(json))
+        {
+            Map<Integer, TilePack> legacy = gson.fromJson(json, new TypeToken<Map<Integer, TilePack>>() { }.getType());
+            if (legacy != null) { packs.putAll(legacy); }
+        }
+        String prefix = ConfigManager.getWholeKey(DATA_GROUP, null, "pack_");
+        List<String> keys = configs.getConfigurationKeys(prefix);
+        for (String key : keys == null ? Collections.<String>emptyList() : keys)
+        {
+            try
+            {
+                Integer id = Integer.valueOf(key.substring(prefix.length()));
+                TilePack pack = gson.fromJson(configs.getConfiguration(DATA_GROUP, "pack_" + id), TilePack.class);
+                if (pack != null && pack.packTiles != null) { packs.put(id, pack); }
+            }
+            catch (RuntimeException ex) { /* Tile Packs skips an unreadable pack too. */ }
+        }
+        return packs;
     }
 
     private List<Integer> enabledPacks()

@@ -39,6 +39,18 @@ final class Marker
     int[] quadX, quadY;
     /** An open polyline on the ground in local coordinates (NPC Aggression Timer's area lines) instead of the rectangle. */
     int[] lineX, lineY;
+    /**
+     * The actor this footprint stands under (a walking NPC's tile captured from another plugin): drawn where it is each
+     * frame rather than where it was when the mark was made; point is the fallback.
+     */
+    net.runelite.api.Actor follow;
+
+    /** Where the footprint is now: the followed actor's location, else point. */
+    net.runelite.api.coords.LocalPoint where()
+    {
+        net.runelite.api.coords.LocalPoint now = follow == null ? null : follow.getLocalLocation();
+        return now != null && now.getWorldView() == point.getWorldView() ? now : point;
+    }
 
     Marker(String key, LocalPoint point, int plane, int width, int height, Color color, Color fill,
         double borderWidth, String label, boolean ground)

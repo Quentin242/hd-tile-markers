@@ -43,8 +43,30 @@ final class SceneShapeRenderer
     private int frame;
     /** New outline traces per frame are limited to this much time; the rest are drawn as hulls. */
     private static final long OUTLINE_BUDGET_NANOS = 2_500_000;
-    private long outlineNanos;
-    private final java.util.Deque<Bucket> spareCarriers = new ArrayDeque<>();
+    private long outlineNanos, clickboxNanos;
+
+    /** Diagnostics: this frame's time tracing outlines and making clickboxes. */
+    long outlineNanos() { return outlineNanos; }
+    long clickboxNanos() { return clickboxNanos; }
+    /** Models no scene object uses now, kept for the next ones: making and uploading a model costs. */
+    private final java.util.Deque<Spare> spareCarriers = new ArrayDeque<>();
+
+    /** A model given up by its scene object, with what the next owner must clear of it. */
+    private static final class Spare
+    {
+        final Model model;
+        final int radius, usedFaces, usedVertices;
+        Spare(Model model, int radius, int usedFaces, int usedVertices)
+        { this.model = model; this.radius = radius; this.usedFaces = usedFaces; this.usedVertices = usedVertices; }
+    }
+
+    /** Takes the scene object out of the scene and keeps its model as a spare, if there is room. */
+    private void retire(Bucket b)
+    {
+        b.hide();
+        Spare spare = b.release();
+        if (spare != null && spareCarriers.size() < MAX_SPARES) { spareCarriers.addLast(spare); }
+    }
     private static final int MAX_SPARES = 64;
 
     /** Frame-local owned data: actor mesh arrays can be overwritten by another getModel(). */
@@ -57,14 +79,32 @@ final class SceneShapeRenderer
         int faces, n;
         float depth;
         boolean outside;
+        /** Some vertices were not projected (at or too near the camera): their faces are left out of every shape. */
+        boolean partial;
+        /** The model's clickbox is its projected bounding box (Model.useBoundingBox), not a union of face rectangles. */
+        boolean boundingBox;
         List<float[]> loops;
+        /** The projected bounding box's convex hull (clickbox bounds), or null; and the clickbox from it. */
+        float[] boundsHull;
+        List<float[]> clickbox;
         int frame, facesFrame, localX, localY, height, orientation;
         ModelShapes.Camera camera;
+        /** The previous projection's points, kept to see whether a new one came out the same (see project). */
+        float[] lastX = new float[0], lastY = new float[0];
+        /** Hidden faces, summed, and the viewport of the projection: all a clickbox or outline depends on besides points. */
+        long hiddenSum;
+        int viewport;
     }
     private final Silhouette.Scratch silhouetteScratch = new Silhouette.Scratch();
     private final ScreenOutline outline = new ScreenOutline();
+    /** The outline cut around the player, made apart: used only when it still fits a scene object. */
+    private final ScreenOutline cutOutline = new ScreenOutline();
+    /** Diagnostics: shapes left out this frame because they did not fit a scene object, or lay out of reach. */
+    private int tooLarge, outOfReach, cutSkipped;
     private final float[] point = new float[3];
     private float[] px = new float[64], py = new float[64], pd = new float[64];
+    /** Scratch for model hulls, outlines and clickboxes; ScreenOutline copies what it needs. */
+    private float[] hx = new float[64], hy = new float[64], hd = new float[64];
     private ModelShapes.Camera camera;
     private float normalX, normalY, normalZ, pixel = 1;
     /**
@@ -75,14 +115,51 @@ final class SceneShapeRenderer
     int floatingAlphaCap = 255;
     /** Shadow transparency off: just under its 0.71 threshold. */
     static final int HD_CAP_OPAQUE_SHADOWS = 180;
+    /**
+     * 117 HD with its default shading caps the lightness of every coloured face (undoVanillaShading:
+     * 127 - 72 * (saturation / 7) ^ 0.05, 55 at full saturation); only grey may be lighter. Light colours,
+     * such as pink, would all turn into their pure colour: they are drawn as that colour with white over it.
+     */
+    boolean hdLightnessCap;
+    /** Scratch for FlatModel.layers: {hsl, alpha, white alpha} of border and fill. */
+    private final int[] borderLayers = new int[3], fillLayers = new int[3];
     private boolean unavailable;
     private int carriersCreated;
     private int layer;
     /** Through walls: shapes are pulled towards the camera, gathered in one object where possible. */
     private boolean xray, xrayCameraNear;
+    /**
+     * Through walls, marks leave out the local player's silhouette on screen (set per frame by cutAround): they still
+     * show through every wall and object, and the player stands in front of them. Depth cannot do both: behind the
+     * player, a mark near it went under the walls and objects around it too.
+     */
+    private PlayerCut playerCut;
+    /** The player's projection this frame is ready but not yet traced (see cutAround); its bounds on the canvas. */
+    private boolean playerPending;
+    private float playerMinX, playerMinY, playerMaxX, playerMaxY;
+    private int playerN, playerFaces;
+    /** The last traced projection, to reuse its cut while the player and the camera stay exactly the same. */
+    private float[] lastPlayerX = new float[0], lastPlayerY = new float[0];
+    private int lastPlayerN = -1, lastPlayerFaces;
+    private PlayerCut lastPlayerCut;
+    /** Marks with more faces than this are drawn whole over the player: cut, they could outgrow a scene object. */
+    private static final int MAX_CUT_FACES = 600;
+    /** Whether the shape being drawn goes through walls (xray). */
+    private boolean shapeXray;
+    private final Silhouette.Scratch playerScratch = new Silhouette.Scratch();
+    private float[] playerX = new float[0], playerY = new float[0];
+    private int[] playerA = new int[0], playerB = new int[0], playerC = new int[0];
+    private boolean[] playerHidden = new boolean[0];
     private LocalPoint xrayAnchor;
     private int xrayLevel, xrayHeight;
     private static final float XRAY_NEAR = 200, XRAY_SCALE = 0.03f;
+    /**
+     * Nearest depth of a through-walls vertex: the GPU plugin skips a see-through model whole if any vertex is
+     * nearer than 50 (ModelUploader.uploadSortedModel), with its own camera, which may differ slightly.
+     */
+    private static final float XRAY_MIN_DEPTH = ModelShapes.NEAR + 30;
+    /** Depth taken by the layer bias (0.25 per layer, up to HULL_LAYER + 3 = 15 and a white layer), above XRAY_MIN_DEPTH. */
+    private static final float XRAY_LAYER_SPAN = 4f;
     /*
      * The GPU plugin draws nothing of a see-through model whose diameter is 6000 or more
      * (ModelUploader.uploadSortedModel; Zone.renderAlpha likewise). Carrier bounds are six extreme
@@ -121,6 +198,10 @@ final class SceneShapeRenderer
         appended.clear();
         frame++;
         outlineNanos = 0;
+        clickboxNanos = 0;
+        playerCutNanos = 0;
+        playerCut = null;
+        playerPending = false;
         unavailable = false;
         for (Bucket b : buckets.values()) { b.vertices = 0; b.faces = 0; }
         // Normals point straight up (model y is down): 117 HD, which uses them because faces are not
@@ -146,29 +227,32 @@ final class SceneShapeRenderer
         WorldView wv = client.getTopLevelWorldView();
         if (unavailable || m.point.getWorldView() != wv.getId()) { return false; }
         if ((m.borderWidth <= 0 || m.color.getAlpha() == 0) && m.fill.getAlpha() == 0) { return culled(m.key); }
+        shapeXray = xray;
         layer = m.layer;
         if (m.dot) { return dot(wv, m); }
         if (m.quadX != null) { return quad(wv, m); }
         if (m.lineX != null) { return line(wv, m); }
+        LocalPoint at = m.where();
         int w = m.width, h = m.height, n = 2 * (w + h);
         ensure(n);
-        int x0 = m.point.getX() - w * 64, y0 = m.point.getY() - h * 64, k = 0;
-        int level = Terrain.level(wv, m.point.getSceneX(), m.point.getSceneY(), m.plane);
+        int x0 = at.getX() - w * 64, y0 = at.getY() - h * 64, k = 0;
+        int level = Terrain.level(wv, at.getSceneX(), at.getSceneY(), m.plane);
         // Walk the perimeter counterclockwise, sampling height at every tile boundary.
         for (int i = 0; i < w; i++) { k = sample(wv, level, x0 + i * 128, y0, k); }
         for (int j = 0; j < h; j++) { k = sample(wv, level, x0 + w * 128, y0 + j * 128, k); }
         for (int i = w; i > 0; i--) { k = sample(wv, level, x0 + i * 128, y0 + h * 128, k); }
         for (int j = h; j > 0; j--) { k = sample(wv, level, x0, y0 + j * 128, k); }
         if (k < 0) { return false; }
-        int centerHeight = Terrain.heightOnLevel(wv, m.point.getX(), m.point.getY(), level);
-        camera.project(m.point.getX(), m.point.getY(), centerHeight, point);
+        int centerHeight = Terrain.heightOnLevel(wv, at.getX(), at.getY(), level);
+        camera.project(at.getX(), at.getY(), centerHeight, point);
         boolean corners = m.cornerDivisor > 0;
-        if (!(point[2] >= ModelShapes.NEAR) || !outline.build(px, py, pd, n, point[0], point[1], point[2],
+        if (!(point[2] >= PARTIAL_NEAR) || !outline.build(px, py, pd, n, point[0], point[1], point[2],
             Math.max(0.01f, m.borderWidth * pixel))) { return false; }
+        if (oversized()) { return false; }
         if (offscreen()) { return culled(m.key); }
-        if (!corners) { return draw(m.key, m.point, level, centerHeight, m.color, m.fill, m.borderWidth > 0); }
+        if (!corners) { return draw(m.key, at, level, centerHeight, m.color, m.fill, m.borderWidth > 0); }
         // Corners only: the fill covers the whole footprint, the border only its corners.
-        if (m.fill.getAlpha() > 0) { draw(m.key, m.point, level, centerHeight, m.color, m.fill, false); }
+        if (m.fill.getAlpha() > 0) { draw(m.key, at, level, centerHeight, m.color, m.fill, false); }
         if (m.borderWidth > 0) { corners(m, n, w, h, level, centerHeight); }
         return true;
     }
@@ -193,7 +277,7 @@ final class SceneShapeRenderer
             sx[2] = lerp(cx[corner], cx[next], t); sy[2] = lerp(cy[corner], cy[next], t); sd[2] = lerp(cd[corner], cd[next], t);
             if (outline.buildStrip(sx, sy, sd, 3, Math.max(0.01f, m.borderWidth * pixel)))
             {
-                draw(m.key, m.point, level, centerHeight, m.color, Marker.NO_FILL, true);
+                draw(m.key, m.where(), level, centerHeight, m.color, Marker.NO_FILL, true);
             }
         }
     }
@@ -218,8 +302,9 @@ final class SceneShapeRenderer
         if (k < 0) { return false; }
         int centerHeight = Terrain.heightOnLevel(wv, m.point.getX(), m.point.getY(), level);
         camera.project(m.point.getX(), m.point.getY(), centerHeight, point);
-        if (!(point[2] >= ModelShapes.NEAR) || !outline.build(px, py, pd, n, point[0], point[1], point[2],
+        if (!(point[2] >= PARTIAL_NEAR) || !outline.build(px, py, pd, n, point[0], point[1], point[2],
             Math.max(0.01f, m.borderWidth * pixel))) { return false; }
+        if (oversized()) { return false; }
         if (offscreen()) { return culled(m.key); }
         return draw(m.key, m.point, level, centerHeight, m.color, m.fill, m.borderWidth > 0);
     }
@@ -233,6 +318,7 @@ final class SceneShapeRenderer
         int level = Terrain.level(wv, m.point.getSceneX(), m.point.getSceneY(), m.plane), k = 0;
         for (int i = 0; i < n && k >= 0; i++) { k = sample(wv, level, Math.max(0, m.lineX[i]), Math.max(0, m.lineY[i]), k); }
         if (k < 0 || !outline.buildStrip(px, py, pd, n, Math.max(0.01f, m.borderWidth * pixel))) { return false; }
+        if (oversized()) { return false; }
         if (offscreen()) { return culled(m.key); }
         int height = Terrain.heightOnLevel(wv, m.point.getX(), m.point.getY(), level);
         return draw(m.key, m.point, level, height, m.color, Marker.NO_FILL, true);
@@ -246,7 +332,7 @@ final class SceneShapeRenderer
         int level = Terrain.level(wv, m.point.getSceneX(), m.point.getSceneY(), m.plane);
         int height = Terrain.heightOnLevel(wv, m.point.getX(), m.point.getY(), level);
         camera.project(m.point.getX(), m.point.getY(), height, point);
-        if (!(point[2] >= ModelShapes.NEAR)) { return false; }
+        if (!(point[2] >= PARTIAL_NEAR)) { return false; }
         float radius = 4 * pixel;
         for (int i = 0; i < n; i++)
         {
@@ -257,6 +343,7 @@ final class SceneShapeRenderer
         }
         if (!outline.build(px, py, pd, n, point[0], point[1], point[2], Math.max(0.01f, m.borderWidth * pixel)))
         { return false; }
+        if (oversized()) { return false; }
         if (offscreen()) { return culled(m.key); }
         return draw(m.key, m.point, level, height, m.color, m.fill, m.borderWidth > 0);
     }
@@ -267,7 +354,7 @@ final class SceneShapeRenderer
         // Corners on the far scene edge belong to the last tile.
         int limitX = wv.getSizeX() * 128 - 1, limitY = wv.getSizeY() * 128 - 1;
         camera.project(x, y, Terrain.heightOnLevel(wv, Math.min(x, limitX), Math.min(y, limitY), level), point);
-        if (!(point[2] >= ModelShapes.NEAR)) { return -1; }
+        if (!(point[2] >= PARTIAL_NEAR)) { return -1; }
         px[k] = point[0]; py[k] = point[1]; pd[k] = point[2];
         return k + 1;
     }
@@ -275,7 +362,8 @@ final class SceneShapeRenderer
     /** Draws a model hull or clickbox; returns whether it is in the scene this frame. */
     boolean model(ModelTarget t)
     {
-        layer = HULL_LAYER;
+        layer = t.layer;
+        shapeXray = xray;
         LocalPoint location = t.location();
         if (unavailable || location == null || location.getWorldView() != client.getTopLevelWorldView().getId())
         { return false; }
@@ -292,7 +380,8 @@ final class SceneShapeRenderer
         }
         projected.frame = frame;
         float depth = projected.depth;
-        if (Float.isNaN(depth)) { return false; }
+        // Nothing of it projects (all at or behind the camera): RuneLite draws nothing of it either, so no 2D shape.
+        if (Float.isNaN(depth)) { return culled(t.key); }
         if (projected.outside && !t.clickbox)
         {
             // Handled by the scene route: do not repeat this work in the 2D fallback.
@@ -317,10 +406,11 @@ final class SceneShapeRenderer
             List<float[]> loops = projected.loops;
             int level = Terrain.level(client.getTopLevelWorldView(), location.getSceneX(), location.getSceneY(), t.plane());
             boolean any = false;
-            for (float[] loop : loops)
+            for (float[] traced : loops)
             {
+                float[] loop = fit(traced);
                 int h = loop.length / 2;
-                float[] hx = new float[h], hy = new float[h], hd = new float[h];
+                ensureHull(h);
                 for (int i = 0; i < h; i++) { hx[i] = loop[i * 2]; hy[i] = loop[i * 2 + 1]; hd[i] = depth; }
                 if (outline.buildPolygon(hx, hy, hd, h, Math.max(0.01f, t.borderWidth * pixel), true) && !offscreen())
                 {
@@ -328,37 +418,53 @@ final class SceneShapeRenderer
                     any = true;
                 }
             }
-            return any;
+            // Close to the camera the faces left out can leave nothing to trace: then no shape this frame rather than
+            // RuneLite's 2D one, which flickered in and out as the camera moved.
+            return any || projected.partial && culled(t.key);
         }
         if (t.clickbox)
         {
-            // RuneLite's own clickbox: an AABB shape for bounding-box models, otherwise a
-            // union of per-face screen rectangles. Drawn as is, at the model's nearest depth.
-            java.awt.Shape shape = t.shape();
-            if (shape == null) { return false; }
+            // RuneLite's clickbox, computed the same way from the float projection (FloatClickbox): RuneLite rounds every
+            // face's rectangle to whole pixels, so its edge wobbled as the camera moved. Kept for static objects while the
+            // camera stands still. Only when it cannot be made (off screen, behind the camera) RuneLite's own is drawn.
+            List<float[]> polygons = t.exactClickbox || twoModels(t.object) ? null : clickbox(t, projected);
+            if (polygons == null)
+            {
+                java.awt.Shape shape = t.shape();
+                if (shape == null) { return projected.partial && culled(t.key); }
+                polygons = polygons(shape);
+            }
             int level = Terrain.level(client.getTopLevelWorldView(), location.getSceneX(), location.getSceneY(), t.plane());
             boolean any = false;
-            for (float[] polygon : polygons(shape))
+            // A union of rectangles can enclose holes, wound the other way round; RuneLite leaves them unfilled
+            // (even-odd), so they get their border only instead of being filled again over the rest.
+            if (polygons.isEmpty()) { return projected.partial && culled(t.key); }
+            double outer = Math.signum(signedArea(largest(polygons)));
+            for (float[] full : polygons)
             {
+                boolean hole = polygons.size() > 1 && Math.signum(signedArea(full)) != outer;
+                float[] polygon = fit(full);
                 int h = polygon.length / 2;
-                float[] hx = new float[h], hy = new float[h], hd = new float[h];
+                ensureHull(h);
                 for (int i = 0; i < h; i++) { hx[i] = polygon[i * 2]; hy[i] = polygon[i * 2 + 1]; hd[i] = depth; }
                 if (outline.buildPolygon(hx, hy, hd, h, Math.max(0.01f, t.borderWidth * pixel)) && !offscreen())
                 {
-                    draw(t.key, location, level, height, t.color, t.fill, t.borderWidth > 0);
+                    draw(t.key, location, level, height, t.color, hole ? Marker.NO_FILL : t.fill, t.borderWidth > 0);
                     any = true;
                 }
             }
-            return any;
+            // Close to the camera the faces left out can leave nothing to trace: then no shape this frame rather than
+            // RuneLite's 2D one, which flickered in and out as the camera moved.
+            return any || projected.partial && culled(t.key);
         }
         if (projected.hull == null)
         {
-            projected.hull = ModelShapes.convexHull(projected.x, projected.y, projected.n);
+            projected.hull = hullOf(projected.x, projected.y, projected.n);
         }
         hull = projected.hull;
-        if (hull == null || hull.length < 6) { return false; }
+        if (hull == null || hull.length < 6) { return projected.partial && culled(t.key); }
         int h = hull.length / 2;
-        float[] hx = new float[h], hy = new float[h], hd = new float[h];
+        ensureHull(h);
         float cx = 0, cy = 0;
         for (int i = 0; i < h; i++) { hx[i] = hull[i * 2]; hy[i] = hull[i * 2 + 1]; hd[i] = depth; cx += hx[i]; cy += hy[i]; }
         // Just in front of the nearest vertex, so the shape covers the model like the 2D overlay does.
@@ -380,32 +486,64 @@ final class SceneShapeRenderer
             && p.height == height && p.orientation == t.orientation() && p.frame == frame - 1;
     }
 
+    /**
+     * Points nearer the camera than this (about one tile) are left out of hulls, outlines and clickboxes, and a tile,
+     * path or line with such a point is not drawn: they project to huge canvas positions, which drew a screen-wide
+     * shape for a frame when the camera passed an object or came in close at login.
+     */
+    static final float PARTIAL_NEAR = 150;
+
     private void project(ModelTarget t, Mesh<?> mesh, Projection p, LocalPoint location, int height)
     {
         int n = mesh.getVerticesCount();
+        // The last projection's points and shapes, to keep when this one comes out the same: an NPC standing still,
+        // or its animation between two of its frames, while the camera does not move. Its clickbox and outline were
+        // made again every frame, the largest part of the scene's time.
+        int lastN = p.n, lastFaces = p.faces, lastViewport = p.viewport;
+        long lastHidden = p.hiddenSum;
+        List<float[]> lastClickbox = p.clickbox, lastLoops = p.loops;
+        float[] lastHull = p.hull, swapX = p.lastX, swapY = p.lastY;
+        p.lastX = p.x; p.lastY = p.y;
+        p.x = swapX; p.y = swapY;
         if (p.x.length < n) { p.x = new float[n]; p.y = new float[n]; }
         p.n = n;
         p.hull = null;
         p.loops = null;
+        p.clickbox = null;
+        // Every projection gets the clickbox bounds from the mesh at hand (one pass over the vertices, eight projections),
+        // whichever style made it: fetching the mesh again for a clickbox rebuilt an NPC's animated model a second time.
+        p.boundsHull = boundsHull(mesh, n, location.getX(), location.getY(), height, t.orientation());
         p.facesFrame = 0;
         p.faces = 0;
         p.camera = camera; p.localX = location.getX(); p.localY = location.getY(); p.height = height; p.orientation = t.orientation();
+        p.boundingBox = mesh instanceof Model && ((Model) mesh).useBoundingBox();
+        // A model partly at or behind the camera keeps its other vertices, as RuneLite's clickbox and hull skip such
+        // faces; it used to fail whole, and its 2D fallback then drew RuneLite's shape over the scene.
         p.depth = ModelShapes.projectModel(camera, mesh.getVerticesX(), mesh.getVerticesY(), mesh.getVerticesZ(),
-            n, location.getX(), location.getY(), height, t.orientation(), p.x, p.y);
+            n, location.getX(), location.getY(), height, t.orientation(), p.x, p.y, PARTIAL_NEAR);
         float minX = Float.POSITIVE_INFINITY, minY = minX, maxX = Float.NEGATIVE_INFINITY, maxY = maxX;
+        p.partial = false;
         for (int i = 0; i < n; i++)
         {
+            if (Float.isNaN(p.x[i])) { p.partial = true; continue; }
             minX = Math.min(minX, p.x[i]); maxX = Math.max(maxX, p.x[i]);
             minY = Math.min(minY, p.y[i]); maxY = Math.max(maxY, p.y[i]);
         }
         // Conservative margin includes the widest supported border and its mitres.
         float margin = 64 * pixel;
         int vx = client.getViewportXOffset(), vy = client.getViewportYOffset();
+        int vw = client.getViewportWidth(), vh = client.getViewportHeight();
+        p.viewport = Objects.hash(vx, vy, vw, vh);
         p.outside = maxX + margin < vx || maxY + margin < vy
-            || minX - margin > vx + client.getViewportWidth() || minY - margin > vy + client.getViewportHeight();
+            || minX - margin > vx + vw || minY - margin > vy + vh;
         // Actor models live in a shared client buffer: copy their faces now, into reused arrays, in case
         // another style of this NPC needs them after another actor's getModel(). Objects only for outlines.
         if (t.outline || t.npc != null) { copyFaces(mesh, p); }
+        if (n == lastN && p.faces == lastFaces && p.faces > 0 && p.hiddenSum == lastHidden && p.viewport == lastViewport
+            && Arrays.equals(p.x, 0, n, p.lastX, 0, n) && Arrays.equals(p.y, 0, n, p.lastY, 0, n))
+        {
+            p.clickbox = lastClickbox; p.loops = lastLoops; p.hull = lastHull;
+        }
     }
 
     /**
@@ -445,6 +583,9 @@ final class SceneShapeRenderer
             if (p.hidden == null || p.hidden.length < faces) { p.hidden = new boolean[faces]; }
             for (int f = 0; f < faces; f++) { p.hidden[f] = f < colors.length && colors[f] == -2; }
         }
+        long hiddenSum = 0;
+        if (p.hidden != null) { for (int f = 0; f < faces; f++) { if (p.hidden[f]) { hiddenSum += f * 31L + 1; } } }
+        p.hiddenSum = hiddenSum;
         p.faces = faces;
     }
 
@@ -468,21 +609,32 @@ final class SceneShapeRenderer
         // Through walls applies to every shape, tiles as well as hulls, clickboxes and outlines: all of them
         // then sit at the same place in front of the camera, so lighting renderers (117 HD: shadows, fog,
         // lights) shade them all alike.
-        boolean throughWalls = xray;
+        boolean throughWalls = shapeXray;
         // World points of the shape: on the ground for through walls (moved to the camera at draw time),
         // else just above it towards the camera. Later layers slightly nearer, so shapes never z-fight.
         if (tx.length < outline.vertices)
         {
             tx = new float[outline.vertices * 2]; ty = new float[outline.vertices * 2]; tz = new float[outline.vertices * 2];
         }
-        float layerBias = layer * 0.001f;
-        for (int i = 0; i < outline.vertices; i++)
+        // A mark through walls leaves the player uncovered: the part over its silhouette is cut out.
+        PlayerCut cut = throughWalls && (playerPending || playerCut != null) && outline.faces <= MAX_CUT_FACES
+            && outline.maxX > playerMinX && outline.minX < playerMaxX && outline.maxY > playerMinY && outline.minY < playerMaxY
+            ? playerCut() : null;
+        if (cut != null && outline.maxX > cut.minX && outline.minX < cut.maxX && outline.maxY > cut.minY && outline.minY < cut.maxY)
         {
-            float d = outline.depth[i];
-            float at = throughWalls ? d : d - Math.max(4, d * 0.01f) - Math.max(1, d * layerBias);
-            camera.unproject(outline.x[i], outline.y[i], at, point);
-            tx[i] = point[0]; ty[i] = point[1]; tz[i] = point[2];
+            cutOutline.copyFrom(outline);
+            cutOutline.cutOut(cut);
+            if (cutOutline.faces == 0) { appended.add(key); return true; }
+            // Cut into many pieces, a large mark could outgrow a scene object (twice, for a white layer); it is then
+            // drawn whole rather than falling back to its 2D shape (which flickered as the player moved).
+            if (carriers.fits(cutOutline.vertices * 2, cutOutline.faces * 2)) { outline.copyFrom(cutOutline); }
+            else { cutSkipped++; }
+            if (tx.length < outline.vertices)
+            {
+                tx = new float[outline.vertices * 2]; ty = new float[outline.vertices * 2]; tz = new float[outline.vertices * 2];
+            }
         }
+        place(throughWalls, false);
         WorldView top = client.getTopLevelWorldView();
         boolean shared = throughWalls && (xrayCameraNear || within(xrayAnchor.getX(), xrayAnchor.getY(), xrayHeight, XRAY_SHARED));
         if (shared)
@@ -497,13 +649,18 @@ final class SceneShapeRenderer
         int tileY = Math.max(0, Math.min(top.getSizeY() - 1, anchor.getY() >> 7));
         // Floating marks under 117 HD stay under its shadow threshold.
         int cap = throughWalls ? floatingAlphaCap : 255;
-        int borderAlpha = Math.min(cap, hasBorder ? border.getAlpha() : 0), fillAlpha = Math.min(cap, fill.getAlpha());
-        int borderHsl = FlatModel.hsl(border), fillHsl = FlatModel.hsl(fill);
+        // The cap applies to the colour as a whole, before it is split into layers that blend to it.
+        FlatModel.layers(border, Math.min(cap, hasBorder ? border.getAlpha() : 0), hdLightnessCap, borderLayers);
+        FlatModel.layers(fill, Math.min(cap, fill.getAlpha()), hdLightnessCap, fillLayers);
+        int borderHsl = borderLayers[0], borderAlpha = borderLayers[1], borderWhite = borderLayers[2];
+        int fillHsl = fillLayers[0], fillAlpha = fillLayers[1], fillWhite = fillLayers[2];
+        // The white layer: a second copy of the outline, just nearer the camera so it is drawn over the colour.
+        boolean white = borderWhite > 0 || fillWhite > 0;
         // A single shape too large for any scene object is left out; a bucket past the carrier limits fails the whole frame.
-        int addVertices = outline.vertices, addFaces = outline.faces;
-        if (!carriers.fits(addVertices, addFaces)
-            || !shared && !within(tileX * 128 + 64, tileY * 128 + 64, Terrain.heightOnLevel(top, tileX * 128 + 64, tileY * 128 + 64, level),
-                throughWalls ? XRAY_REACH - 200 : MAX_RADIUS - 300)) { return false; }
+        int addVertices = outline.vertices * (white ? 2 : 1), addFaces = outline.faces * (white ? 2 : 1);
+        if (!carriers.fits(addVertices, addFaces)) { tooLarge++; return false; }
+        if (!shared && !within(tileX * 128 + 64, tileY * 128 + 64, Terrain.heightOnLevel(top, tileX * 128 + 64, tileY * 128 + 64, level),
+                throughWalls ? XRAY_REACH - 200 : MAX_RADIUS - 300)) { outOfReach++; return false; }
         // Through-walls shapes get their own buckets: they are moved to the camera, others are not.
         long base = ((long) level << 32) | ((long) tileX << 16) | tileY | (throughWalls ? 1L << 40 : 0) | (shared ? 1L << 39 : 0);
         // A full bucket continues in another object on the same tile, so no model exceeds the renderer's limits.
@@ -518,10 +675,40 @@ final class SceneShapeRenderer
         b.ensure(b.vertices + addVertices, b.faces + addFaces);
         b.xray = throughWalls;
         b.shared = shared;
+        append(b, layer, borderHsl, borderAlpha, fillHsl, fillAlpha);
+        if (white)
+        {
+            if (!throughWalls) { place(false, true); }
+            append(b, layer + 0.5f, FlatModel.WHITE, borderWhite, FlatModel.WHITE, fillWhite);
+        }
+        appended.add(key);
+        return true;
+    }
+
+    /**
+     * World points (tx, ty, tz) of the outline: on the ground for through walls (moved to the camera at draw time),
+     * else just above it towards the camera, later layers slightly nearer so shapes never z-fight. The white layer
+     * of a light colour is always a little nearer than its colour layer, also where the layer offset bottoms out.
+     */
+    private void place(boolean throughWalls, boolean white)
+    {
+        float layerBias = layer * 0.001f;
+        for (int i = 0; i < outline.vertices; i++)
+        {
+            float d = outline.depth[i];
+            float at = throughWalls ? d : d - Math.max(4, d * 0.01f) - Math.max(1, d * layerBias) - (white ? Math.max(0.5f, d * 0.0005f) : 0);
+            camera.unproject(outline.x[i], outline.y[i], at, point);
+            tx[i] = point[0]; ty[i] = point[1]; tz[i] = point[2];
+        }
+    }
+
+    /** Adds the outline's vertices (tx, ty, tz) and its visible faces to the bucket. */
+    private void append(Bucket b, float vertexLayer, int borderHsl, int borderAlpha, int fillHsl, int fillAlpha)
+    {
         int first = b.vertices;
         for (int i = 0; i < outline.vertices; i++)
         {
-            b.layer[first + i] = layer;
+            b.layer[first + i] = vertexLayer;
             b.wx[first + i] = tx[i]; b.wy[first + i] = ty[i]; b.wz[first + i] = tz[i];
         }
         b.vertices += outline.vertices;
@@ -535,8 +722,170 @@ final class SceneShapeRenderer
             b.color[k] = isBorder ? borderHsl : fillHsl;
             b.alpha[k] = alpha;
         }
-        appended.add(key);
-        return true;
+    }
+
+    /**
+     * Walls and decorations with a second model: RuneLite's clickbox covers both, the float clickbox only the first,
+     * so RuneLite's own is drawn for them.
+     */
+    private static boolean twoModels(TileObject object)
+    {
+        return object instanceof WallObject && ((WallObject) object).getRenderable2() != null
+            || object instanceof DecorativeObject && ((DecorativeObject) object).getRenderable2() != null;
+    }
+
+    /**
+     * The clickbox polygons from the projection: the bounding box hull for bounding-box models, else RuneLite's union of
+     * face rectangles clipped to it (FloatClickbox). Null without face topology.
+     */
+    private List<float[]> clickbox(ModelTarget t, Projection p)
+    {
+        if (p.clickbox != null) { return p.clickbox; }
+        long start = System.nanoTime();
+        try { return makeClickbox(t, p); }
+        finally { clickboxNanos += System.nanoTime() - start; }
+    }
+
+    private List<float[]> makeClickbox(ModelTarget t, Projection p)
+    {
+        if (p.boundingBox) { return p.boundsHull == null ? null : (p.clickbox = Collections.singletonList(p.boundsHull)); }
+        if (!faces(t, p)) { return null; }
+        int vx = client.getViewportXOffset();
+        // As calculate2DBounds, which takes the viewport's x offset for its top edge too.
+        return p.clickbox = FloatClickbox.of(p.x, p.y, p.a, p.b, p.c, p.faces, p.hidden, p.boundsHull,
+            vx, vx, vx + client.getViewportWidth(), vx + client.getViewportHeight());
+    }
+
+    /**
+     * The convex hull {x0, y0, ...} of the model's bounding box on the canvas (Perspective.calculateAABB), or null:
+     * Model.getAABB as RuneLite takes it, or for unlit ModelData (no getAABB) the box of its vertices.
+     */
+    private float[] boundsHull(Mesh<?> mesh, int n, int localX, int localY, int height, int orientation)
+    {
+        if (n <= 0) { return null; }
+        float x1, x2, y1, y2, z1, z2;
+        AABB box = mesh instanceof Model ? ((Model) mesh).getAABB(orientation) : null;
+        if (box != null)
+        {
+            // RuneLite's own box (Perspective.calculateAABB): it can be larger than the vertices, and a bounding-box
+            // model's clickbox is exactly this box.
+            x1 = box.getCenterX() - box.getExtremeX(); x2 = box.getCenterX() + box.getExtremeX();
+            y1 = box.getCenterY() - box.getExtremeY(); y2 = box.getCenterY() + box.getExtremeY();
+            z1 = box.getCenterZ() - box.getExtremeZ(); z2 = box.getCenterZ() + box.getExtremeZ();
+        }
+        else
+        {
+            // Unlit ModelData has no getAABB: the box of its vertices turned as ModelShapes.projectModel turns them.
+            float[] vx = mesh.getVerticesX(), vy = mesh.getVerticesY(), vz = mesh.getVerticesZ();
+            double angle = (orientation & 2047) * Math.PI / 1024;
+            float sin = (float) Math.sin(angle), cos = (float) Math.cos(angle);
+            x1 = Float.MAX_VALUE; x2 = -Float.MAX_VALUE; y1 = x1; y2 = x2; z1 = x1; z2 = x2;
+            for (int i = 0; i < n; i++)
+            {
+                float rx = vz[i] * sin + vx[i] * cos, rz = vz[i] * cos - vx[i] * sin;
+                x1 = Math.min(x1, rx); x2 = Math.max(x2, rx);
+                y1 = Math.min(y1, vy[i]); y2 = Math.max(y2, vy[i]);
+                z1 = Math.min(z1, rz); z2 = Math.max(z2, rz);
+            }
+        }
+        float[] bx = {x1, x2, x1, x2, x1, x2, x1, x2}, by = {y1, y1, y1, y1, y2, y2, y2, y2}, bz = {z1, z1, z2, z2, z1, z1, z2, z2};
+        float[] cx = new float[8], cy = new float[8];
+        // Corners at or behind the camera are left out, as the model's own vertices.
+        if (Float.isNaN(ModelShapes.projectModel(camera, bx, by, bz, 8, localX, localY, height, 0, cx, cy, PARTIAL_NEAR)))
+        { return null; }
+        return hullOf(cx, cy, 8);
+    }
+
+    /** Points a drawn polygon keeps at most: its border and fill then always fit one scene object (see fit). */
+    static final int MAX_POINTS = 256;
+
+    /**
+     * The polygon with at most MAX_POINTS points: simplified (Douglas-Peucker) with the smallest tolerance from half a
+     * pixel up, doubling, that gets there. Close to the camera a clickbox or outline is large on screen and has
+     * thousands of points; its border and fill then outgrew a scene object, the mark was left out and RuneLite's own
+     * 2D shape was drawn instead. At that size a pixel or two is not visible. Unchanged when small enough.
+     */
+    static float[] fit(float[] p)
+    {
+        int n = p.length / 2;
+        if (n <= MAX_POINTS) { return p; }
+        // Split at the first point and the one farthest from it, and simplify both halves.
+        int far = 0;
+        double best = -1;
+        for (int i = 1; i < n; i++)
+        {
+            double d = Math.hypot(p[i * 2] - p[0], p[i * 2 + 1] - p[1]);
+            if (d > best) { best = d; far = i; }
+        }
+        boolean[] keep = new boolean[n];
+        int[] stack = new int[2 * n + 4];
+        for (double tolerance = 0.5; ; tolerance *= 2)
+        {
+            java.util.Arrays.fill(keep, false);
+            keep[0] = keep[far] = true;
+            int top = 0;
+            stack[top++] = 0; stack[top++] = far;
+            stack[top++] = far; stack[top++] = n;
+            while (top > 0)
+            {
+                int to = stack[--top], from = stack[--top];
+                double ax = p[from * 2], ay = p[from * 2 + 1], bx = p[(to % n) * 2], by = p[(to % n) * 2 + 1];
+                double dx = bx - ax, dy = by - ay, length = Math.hypot(dx, dy);
+                int worst = -1;
+                double worstDistance = tolerance;
+                for (int i = from + 1; i < to; i++)
+                {
+                    double qx = p[i * 2] - ax, qy = p[i * 2 + 1] - ay;
+                    double d = length < 1e-9 ? Math.hypot(qx, qy) : Math.abs(dx * qy - dy * qx) / length;
+                    if (d > worstDistance) { worstDistance = d; worst = i; }
+                }
+                if (worst >= 0)
+                {
+                    keep[worst] = true;
+                    stack[top++] = from; stack[top++] = worst;
+                    stack[top++] = worst; stack[top++] = to;
+                }
+            }
+            int count = 0;
+            for (boolean k : keep) { if (k) { count++; } }
+            if (count <= MAX_POINTS || tolerance > 64)
+            {
+                float[] out = new float[count * 2];
+                for (int i = 0, k = 0; i < n; i++) { if (keep[i]) { out[k++] = p[i * 2]; out[k++] = p[i * 2 + 1]; } }
+                return out;
+            }
+        }
+    }
+
+    static double signedArea(float[] p)
+    {
+        double area = 0;
+        for (int i = 0, n = p.length / 2; i < n; i++) { int j = (i + 1) % n; area += p[i * 2] * p[j * 2 + 1] - p[j * 2] * p[i * 2 + 1]; }
+        return area / 2;
+    }
+
+    private static float[] largest(List<float[]> polygons)
+    {
+        float[] best = polygons.get(0);
+        for (float[] p : polygons) { if (Math.abs(signedArea(p)) > Math.abs(signedArea(best))) { best = p; } }
+        return best;
+    }
+
+    /** The convex hull of the projected points (NaN: not projected, left out), or null with fewer than three. */
+    static float[] hullOf(float[] xs, float[] ys, int n)
+    {
+        int valid = 0;
+        for (int i = 0; i < n; i++) { if (!Float.isNaN(xs[i])) { valid++; } }
+        if (valid < 3) { return null; }
+        float[] hull;
+        if (valid == n) { hull = ModelShapes.convexHull(xs, ys, n); }
+        else
+        {
+            float[] fx = new float[valid], fy = new float[valid];
+            for (int i = 0, k = 0; i < n; i++) { if (!Float.isNaN(xs[i])) { fx[k] = xs[i]; fy[k++] = ys[i]; } }
+            hull = ModelShapes.convexHull(fx, fy, valid);
+        }
+        return hull == null || hull.length < 6 ? null : hull;
     }
 
     /** The closed polygons of a canvas shape, as {x0, y0, x1, y1, ...}, without a repeated closing point. */
@@ -612,9 +961,24 @@ final class SceneShapeRenderer
             || outline.minX > vx + client.getViewportWidth() || outline.minY > vy + client.getViewportHeight();
     }
 
+    /**
+     * A tile, path or line shape larger than three viewports: none is, unless a point lies right at the camera (a
+     * screen-wide square flashed at login). Such a shape is not drawn. Hulls and clickboxes of a building close by can
+     * be that large, so they are not checked.
+     */
+    private boolean oversized()
+    {
+        return outline.maxX - outline.minX > 3 * client.getViewportWidth() || outline.maxY - outline.minY > 3 * client.getViewportHeight();
+    }
+
     private void ensure(int n)
     {
         if (px.length < n) { px = new float[n * 2]; py = new float[n * 2]; pd = new float[n * 2]; }
+    }
+
+    private void ensureHull(int n)
+    {
+        if (hx.length < n) { hx = new float[n * 2]; hy = new float[n * 2]; hd = new float[n * 2]; }
     }
 
     private boolean culled(String key)
@@ -632,8 +996,7 @@ final class SceneShapeRenderer
             Bucket b = it.next().getValue();
             if (unavailable || b.faces == 0)
             {
-                b.hide();
-                if (!unavailable && b.model != null && spareCarriers.size() < MAX_SPARES) { spareCarriers.addLast(b); }
+                if (unavailable) { b.hide(); } else { retire(b); }
                 it.remove();
             }
         }
@@ -668,38 +1031,47 @@ final class SceneShapeRenderer
         for (int i = 0; i < b.vertices && !b.xray; i++)
         {
             float dx = b.wx[i] - anchorX, dy = b.wy[i] - anchorY, dz = b.wz[i] - anchorZ;
-            extent = Math.max(extent, Math.max((float) Math.hypot(dx, dy), Math.abs(dz)));
+            extent = Math.max(extent, Math.max((float) Math.sqrt((double) dx * dx + (double) dy * dy), Math.abs(dz)));
         }
         if (b.model == null || b.model.getVerticesCount() < b.vertices || b.model.getFaceCount() < b.faces || extent > b.radius)
         {
-            b.hide();
-            Bucket spare = null;
-            for (Iterator<Bucket> free = spareCarriers.iterator(); free.hasNext();)
+            // The model it had goes back to the spares for smaller objects.
+            retire(b);
+            // The smallest spare with room to grow, so the next frame's slightly larger shape still fits and a small
+            // object does not take a large model, whose unused capacity is walked every frame.
+            float wantRadius = b.xray ? extent : Math.min(MAX_RADIUS, extent * 1.25f);
+            int wantVertices = (int) Math.ceil(b.vertices * 1.25f), wantFaces = (int) Math.ceil(b.faces * 1.25f);
+            Spare spare = null;
+            for (Spare candidate : spareCarriers)
             {
-                Bucket candidate = free.next();
-                if (candidate.radius >= extent && candidate.model.getVerticesCount() >= b.vertices
-                    && candidate.model.getFaceCount() >= b.faces)
-                { spare = candidate; free.remove(); break; }
+                if (candidate.radius >= wantRadius && candidate.model.getVerticesCount() >= wantVertices
+                    && candidate.model.getFaceCount() >= wantFaces
+                    && (spare == null || candidate.model.getVerticesCount() < spare.model.getVerticesCount()))
+                { spare = candidate; }
             }
             if (spare != null)
             {
-                b.model = spare.model; b.radius = spare.radius;
-                b.usedFaces = spare.usedFaces; b.usedVertices = spare.usedVertices;
+                spareCarriers.remove(spare);
+                b.adopt(spare.model, spare.radius, spare.usedFaces, spare.usedVertices);
             }
             else
             {
-                b.radius = b.xray ? MAX_RADIUS : Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, (int) Math.ceil(extent * 1.5f)));
-                b.model = carriers.create(Math.max(MIN_VERTICES, b.vertices * 2), Math.max(MIN_FACES, b.faces * 2), b.radius, true);
+                int radius = b.xray ? MAX_RADIUS : Math.min(MAX_RADIUS, Math.max(MIN_RADIUS, (int) Math.ceil(extent * 1.5f)));
+                Model created = carriers.create(Math.max(MIN_VERTICES, b.vertices * 2), Math.max(MIN_FACES, b.faces * 2), radius, true);
                 carriersCreated++;
-                b.usedFaces = 0;
+                if (created == null) { return false; }
+                // Normals point straight up on every carrier: set once (see begin).
+                FlatModel.normals(created, normalX, normalY, normalZ);
                 // Carriers start with six extreme vertices from fixing their bounds.
-                b.usedVertices = 6;
-                if (b.model == null) { return false; }
+                b.adopt(created, radius, 0, 6);
             }
         }
         Model m = b.model;
         b.anchorX = anchorX; b.anchorY = anchorY; b.anchorZ = anchorZ;
         float[] vx = m.getVerticesX(), vy = m.getVerticesY(), vz = m.getVerticesZ();
+        // Unused vertices at the origin, inside the fixed bounds. Through walls, pullToCamera writes every vertex
+        // itself (unused ones onto a used one): no passing through the origin, which the renderer may read meanwhile.
+        if (!b.xray) { for (int i = b.vertices; i < b.usedVertices; i++) { vx[i] = 0; vy[i] = 0; vz[i] = 0; } }
         if (b.xray) { b.freeze(); b.pullToCamera(camera); }
         else
         {
@@ -710,9 +1082,8 @@ final class SceneShapeRenderer
                 vz[i] = b.wy[i] - anchorY;
             }
         }
-        // Unused vertices at the origin, inside the fixed bounds.
-        for (int i = b.vertices; i < b.usedVertices; i++) { vx[i] = 0; vy[i] = 0; vz[i] = 0; }
-        b.usedVertices = b.vertices;
+        // Through walls parks every unused vertex on a used one: all go back to the origin on the next write.
+        b.usedVertices = b.xray ? m.getVerticesCount() : b.vertices;
         int[] i1 = m.getFaceIndices1(), i2 = m.getFaceIndices2(), i3 = m.getFaceIndices3();
         for (int f = 0; f < b.faces; f++)
         {
@@ -721,7 +1092,6 @@ final class SceneShapeRenderer
         }
         for (int f = b.faces; f < b.usedFaces; f++) { FlatModel.hide(m, f); }
         b.usedFaces = b.faces;
-        FlatModel.normals(m, normalX, normalY, normalZ);
         FlatModel.bounds(m);
         b.setLocation(new LocalPoint(anchorX, anchorY, b.worldView), b.level);
         b.setZ(anchorZ);
@@ -733,20 +1103,106 @@ final class SceneShapeRenderer
         return true;
     }
 
+    /**
+     * The local player's silhouette this frame, left uncovered by marks drawn through walls; null for none. Its model
+     * is projected with this frame's camera (after begin) and traced as for outlines.
+     */
+    void cutAround(Player player)
+    {
+        playerCut = null;
+        playerPending = false;
+        if (player == null || !xray || unavailable) { return; }
+        // On a boat the player's location is in the boat's world view, not the one projected here.
+        if (player.getWorldView() != client.getTopLevelWorldView()) { return; }
+        Model model = player.getModel();
+        LocalPoint at = player.getLocalLocation();
+        if (model == null || at == null) { return; }
+        int n = model.getVerticesCount(), faces = model.getFaceCount();
+        if (n <= 0 || faces <= 0) { return; }
+        if (playerX.length < n) { playerX = new float[n * 2]; playerY = new float[n * 2]; }
+        if (playerA.length < faces)
+        {
+            playerA = new int[faces * 2]; playerB = new int[faces * 2]; playerC = new int[faces * 2]; playerHidden = new boolean[faces * 2];
+        }
+        // As the client places an actor: on its footprint's height, raised by its animation.
+        int height = Perspective.getFootprintTileHeight(client, at, player.getWorldView().getPlane(), player.getFootprintSize())
+            - player.getAnimationHeightOffset();
+        float depth = ModelShapes.projectModel(camera, model.getVerticesX(), model.getVerticesY(), model.getVerticesZ(), n,
+            at.getX(), at.getY(), height, player.getCurrentOrientation(), playerX, playerY, PARTIAL_NEAR);
+        if (Float.isNaN(depth)) { return; }
+        float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE, maxX = -Float.MAX_VALUE, maxY = -Float.MAX_VALUE;
+        for (int i = 0; i < n; i++)
+        {
+            if (Float.isNaN(playerX[i])) { continue; }
+            minX = Math.min(minX, playerX[i]); maxX = Math.max(maxX, playerX[i]);
+            minY = Math.min(minY, playerY[i]); maxY = Math.max(maxY, playerY[i]);
+        }
+        if (!(minX < maxX)) { return; }
+        // The model is the client's shared buffer: its faces are copied now, traced only when a mark needs it.
+        System.arraycopy(model.getFaceIndices1(), 0, playerA, 0, faces);
+        System.arraycopy(model.getFaceIndices2(), 0, playerB, 0, faces);
+        System.arraycopy(model.getFaceIndices3(), 0, playerC, 0, faces);
+        int[] colors = model.getFaceColors3();
+        for (int f = 0; f < faces; f++)
+        {
+            playerHidden[f] = colors != null && f < colors.length && colors[f] == -2
+                || playerA[f] < 0 || playerB[f] < 0 || playerC[f] < 0 || playerA[f] >= n || playerB[f] >= n || playerC[f] >= n;
+            if (playerHidden[f]) { playerA[f] = playerB[f] = playerC[f] = 0; }
+        }
+        playerN = n; playerFaces = faces;
+        playerMinX = minX - 1; playerMinY = minY - 1; playerMaxX = maxX + 1; playerMaxY = maxY + 1;
+        playerPending = true;
+    }
+
+    /**
+     * The player's cut, traced on first use in a frame: no trace when no mark lies over the player, and the last one
+     * again while its projection is exactly the same (player and camera still, between animation frames).
+     */
+    private PlayerCut playerCut()
+    {
+        if (!playerPending) { return playerCut; }
+        playerPending = false;
+        int n = playerN;
+        if (lastPlayerCut != null && n == lastPlayerN && playerFaces == lastPlayerFaces
+            && Arrays.equals(playerX, 0, n, lastPlayerX, 0, n) && Arrays.equals(playerY, 0, n, lastPlayerY, 0, n))
+        {
+            return playerCut = lastPlayerCut;
+        }
+        long start = System.nanoTime();
+        playerCut = PlayerCut.of(Silhouette.trace(playerX, playerY, playerA, playerB, playerC, playerFaces, playerHidden, playerScratch));
+        playerCutNanos += System.nanoTime() - start;
+        if (lastPlayerX.length < n) { lastPlayerX = new float[playerX.length]; lastPlayerY = new float[playerX.length]; }
+        System.arraycopy(playerX, 0, lastPlayerX, 0, n);
+        System.arraycopy(playerY, 0, lastPlayerY, 0, n);
+        lastPlayerN = n; lastPlayerFaces = playerFaces; lastPlayerCut = playerCut;
+        return playerCut;
+    }
+
+    private long playerCutNanos;
+
+    /** Diagnostics: shapes left out (too large, out of reach) and cuts skipped since the last reset, or empty. */
+    String leftOut() { return tooLarge + outOfReach + cutSkipped == 0 ? "" : ", left out: " + tooLarge + " too large, " + outOfReach + " out of reach, " + cutSkipped + " uncut"; }
+
+    void resetLeftOut() { tooLarge = outOfReach = cutSkipped = 0; }
+
+    /** Diagnostics: time spent tracing the player's silhouette this frame. */
+    long playerCutNanos() { return playerCutNanos; }
+
     /** Whether the shape with this key is in the scene this frame. */
     boolean drawn(String key) { return !unavailable && appended.contains(key); }
 
+    /** Takes every shape out of the scene; their models stay as spares for the next frames. */
     void clear()
     {
-        for (Bucket b : buckets.values()) { b.hide(); }
+        for (Bucket b : buckets.values()) { retire(b); }
         buckets.clear();
-        spareCarriers.clear();
-        silhouetteScratch.grid = new boolean[0];
+        silhouetteScratch.bits = new long[0];
         projections.clear();
         appended.clear();
     }
 
-    void reset() { clear(); carriers.reset(); }
+    /** As clear, and the models are dropped too. */
+    void reset() { clear(); spareCarriers.clear(); carriers.reset(); }
 
     /** Diagnostics: carrier models created so far. */
     int carriersCreated() { return carriersCreated; }
@@ -758,7 +1214,7 @@ final class SceneShapeRenderer
         Model model;
         int radius, usedFaces, usedVertices, vertices, faces;
         float[] wx = new float[64], wy = new float[64], wz = new float[64];
-        int[] layer = new int[64];
+        float[] layer = new float[64];
         int[] fa = new int[96], fb = new int[96], fc = new int[96], color = new int[96], alpha = new int[96];
         boolean xray, shared;
         int anchorX, anchorY, anchorZ;
@@ -769,15 +1225,30 @@ final class SceneShapeRenderer
          */
         private Model frozenModel;
         private float[] fx = new float[0], fy = fx, fz = fx;
-        private int[] fl = new int[0];
+        private float[] fl = new float[0];
         private int frozenVertices, fAnchorX, fAnchorY, fAnchorZ;
+        /** The camera of the last pull in getModel; NaN after freeze (a new frame), so the next call pulls. */
+        private final double[] pulledWith = {Double.NaN, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+        private synchronized boolean pulledSame(double x, double y, double z, double pitch, double yaw, int scale, int vx, int vy, int vw, int vh)
+        {
+            double[] c = pulledWith;
+            if (c[0] == x && c[1] == y && c[2] == z && c[3] == pitch && c[4] == yaw && c[5] == scale && c[6] == vx && c[7] == vy
+                && c[8] == vw && c[9] == vh) { return true; }
+            c[0] = x; c[1] = y; c[2] = z; c[3] = pitch; c[4] = yaw; c[5] = scale; c[6] = vx; c[7] = vy; c[8] = vw; c[9] = vh;
+            return false;
+        }
+
+        /** Scratch for pullToCamera, which is synchronized. */
+        private final float[] pullPoint = new float[3];
 
         synchronized void freeze()
         {
-            if (fx.length < vertices) { fx = new float[wx.length]; fy = new float[wx.length]; fz = new float[wx.length]; fl = new int[wx.length]; }
+            if (fx.length < vertices) { fx = new float[wx.length]; fy = new float[wx.length]; fz = new float[wx.length]; fl = new float[wx.length]; }
             System.arraycopy(wx, 0, fx, 0, vertices); System.arraycopy(wy, 0, fy, 0, vertices);
             System.arraycopy(wz, 0, fz, 0, vertices); System.arraycopy(layer, 0, fl, 0, vertices);
             frozenModel = model; frozenVertices = vertices;
+            pulledWith[0] = Double.NaN;
             fAnchorX = anchorX; fAnchorY = anchorY; fAnchorZ = anchorZ;
         }
 
@@ -789,16 +1260,26 @@ final class SceneShapeRenderer
         {
             if (frozenModel == null || frozenVertices > frozenModel.getVerticesCount()) { return; }
             float[] vx = frozenModel.getVerticesX(), vy = frozenModel.getVerticesY(), vz = frozenModel.getVerticesZ();
-            float[] p = new float[3];
+            float[] p = pullPoint;
             for (int i = 0; i < frozenVertices; i++)
             {
                 cam.project(fx[i], fy[i], fz[i], p);
-                float at = Math.max(ModelShapes.NEAR + 1, XRAY_NEAR + p[2] * XRAY_SCALE - fl[i] * 0.25f);
-                at = withinReach(cam, fx[i], fy[i], fz[i], p[2], at, fl[i] * 0.25f);
+                float bias = fl[i] * 0.25f;
+                // The floor keeps the layer order (and the white layer in front) where the depth is clamped.
+                float floor = XRAY_MIN_DEPTH + XRAY_LAYER_SPAN - bias;
+                float at = Math.max(floor, XRAY_NEAR + p[2] * XRAY_SCALE - bias);
+                at = Math.max(floor, withinReach(cam, fx[i], fy[i], fz[i], p[2], at, bias));
                 cam.unproject(p[0], p[1], at, p);
                 vx[i] = p[0] - fAnchorX;
                 vy[i] = p[2] - fAnchorZ;
                 vz[i] = p[1] - fAnchorY;
+            }
+            // The GPU plugin skips a see-through model whole if any vertex, used or not, is nearer the camera
+            // than 50 (ModelUploader.uploadSortedModel). The anchor, where unused vertices would sit, can be at
+            // the camera itself: they sit on the first vertex, which is surely in front of it.
+            if (frozenVertices > 0)
+            {
+                for (int i = frozenVertices; i < frozenModel.getVerticesCount(); i++) { vx[i] = vx[0]; vy[i] = vy[0]; vz[i] = vz[0]; }
             }
         }
 
@@ -819,7 +1300,7 @@ final class SceneShapeRenderer
             double enter = (-b - Math.sqrt(disc)) / (2 * a), exit = (-b + Math.sqrt(disc)) / (2 * a);
             double s = wanted / dg;
             // A camera inside the reach: far points could be wanted beyond it.
-            if (s > exit) { return (float) Math.max(ModelShapes.NEAR + 1, exit * dg - bias); }
+            if (s > exit) { return (float) Math.max(XRAY_MIN_DEPTH, exit * dg - bias); }
             if (s >= enter) { return wanted; }
             // Clamped: keep the layer order among shapes at the same place.
             return (float) Math.min(dg, enter * dg) - bias;
@@ -846,18 +1327,49 @@ final class SceneShapeRenderer
 
         void hide() { if (client.isRuneLiteObjectRegistered(this)) { client.removeRuneLiteObject(this); } }
 
+        /**
+         * Gives up the model (null without one): a renderer thread still holding this object then finds no model to
+         * pull, so it never writes into a model another object took over.
+         */
+        synchronized Spare release()
+        {
+            Spare spare = model == null ? null : new Spare(model, radius, usedFaces, usedVertices);
+            model = null;
+            frozenModel = null;
+            return spare;
+        }
+
+        synchronized void adopt(Model m, int radius, int usedFaces, int usedVertices)
+        {
+            model = m; this.radius = radius; this.usedFaces = usedFaces; this.usedVertices = usedVertices;
+        }
+
         @Override public Model getModel()
         {
             trace.modelRequested(client.isClientThread());
+            Model model = this.model;
+            if (model == null) { return null; }
+            double cx = client.getCameraFpX(), cy = client.getCameraFpY(), cz = client.getCameraFpZ();
+            double pitch = client.getCameraFpPitch(), yaw = client.getCameraFpYaw();
+            int scale = client.getScale();
+            // Borders are as wide as wanted for the camera the frame was built with. When the client draws with one
+            // that jumped (at login the frame's camera was not set yet, or a teleport), they became a screen-wide
+            // flash of colour for a frame: nothing is drawn until the next frame is built with the new camera.
+            ModelShapes.Camera built = camera;
+            if (built != null && built.jumpedTo(cx, cy, cz, pitch, yaw, scale)) { return null; }
             // Near the camera, a camera that moved since the frame began is off by many pixels:
             // follow the camera the renderer is drawing with right now.
-            Model model = this.model;
-            if (xray && model != null)
+            if (xray)
             {
-                pullToCamera(new ModelShapes.Camera(client.getCameraFpX(), client.getCameraFpY(), client.getCameraFpZ(),
-                    client.getCameraFpPitch(), client.getCameraFpYaw(), client.getScale(), client.getViewportXOffset(),
-                    client.getViewportYOffset(), client.getViewportWidth(), client.getViewportHeight()));
-                FlatModel.bounds(model);
+                int vx = client.getViewportXOffset(), vy = client.getViewportYOffset();
+                int vw = client.getViewportWidth(), vh = client.getViewportHeight();
+                // The renderer may ask several times per frame (117 HD: shadows, scene): pull again only when the
+                // camera moved or the frame was rewritten since the last pull.
+                if (!pulledSame(cx, cy, cz, pitch, yaw, scale, vx, vy, vw, vh))
+                {
+                    pullToCamera(new ModelShapes.Camera((float) cx, (float) cy, (float) cz, (float) pitch, (float) yaw, scale, vx, vy, vw, vh));
+                    FlatModel.bounds(model);
+                }
             }
             return model;
         }

@@ -26,6 +26,10 @@ public class SceneShapeRendererTest
     @Before public void setup()
     {
         client = mock(Client.class);
+        // The client draws with the camera the frame was built with (CAMERA), unless a test moves it.
+        when(client.getCameraFpX()).thenReturn(1344f); when(client.getCameraFpY()).thenReturn(1344f - 2000);
+        when(client.getCameraFpZ()).thenReturn(-1500f); when(client.getCameraFpPitch()).thenReturn(0.6f);
+        when(client.getScale()).thenReturn(600);
         wv = mock(WorldView.class);
         when(client.getTopLevelWorldView()).thenReturn(wv);
         when(client.getWorldView(-1)).thenReturn(wv);
@@ -358,6 +362,58 @@ public class SceneShapeRendererTest
         assertTrue(cornerFound);
     }
 
+    @Test public void noThroughWallsVertexIsNearerThanTheGpuPluginAllows()
+    {
+        // The GPU plugin skips a see-through model whole if any vertex, used or not, is nearer than 50;
+        // at the camera's height the anchor itself is at the camera.
+        ModelShapes.Camera camera = new ModelShapes.Camera(1344, 344, -1500, 0.6f, 0, 600, 0, 0, 1000, 700);
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        renderer.begin(camera, 1, new LocalPoint(1344, 344, -1), 0);
+        renderer.tile(new Marker("a", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, null, 2, null, false));
+        assertTrue(renderer.end());
+        ArgumentCaptor<RuneLiteObjectController> registered = ArgumentCaptor.forClass(RuneLiteObjectController.class);
+        verify(client).registerRuneLiteObject(registered.capture());
+        RuneLiteObjectController o = registered.getValue();
+        float[] vx = alphaCarrier.getVerticesX(), vy = alphaCarrier.getVerticesY(), vz = alphaCarrier.getVerticesZ();
+        float[] p = new float[3];
+        for (int i = 0; i < alphaCarrier.getVerticesCount(); i++)
+        {
+            camera.project(o.getX() + vx[i], o.getY() + vz[i], o.getZ() + vy[i], p);
+            assertTrue("vertex " + i + " at depth " + p[2], p[2] >= 50);
+        }
+    }
+
+    @Test public void lightColoursUnder117HdGetAWhiteLayer()
+    {
+        Color pink = new Color(255, 207, 207, 127);
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        renderer.hdLightnessCap = true;
+        renderer.begin(CAMERA, 1, null, 0);
+        assertTrue(renderer.tile(new Marker("t", new LocalPoint(1344, 1344, -1), 0, 1, 1, Marker.NO_FILL, pink, 0, null, false)));
+        assertTrue(renderer.end());
+        int[] colors = alphaCarrier.getFaceColors3();
+        int capped = 0, white = 0;
+        for (int f = 0; f < colors.length; f++)
+        {
+            if (colors[f] == FlatModel.WHITE) { white++; }
+            else if (colors[f] != -2) { capped++; assertEquals(55, colors[f] & 127); }
+        }
+        assertEquals(4, capped);
+        assertEquals(4, white);
+    }
+
+    @Test public void lightColoursStayOneLayerWithoutTheCap()
+    {
+        Color pink = new Color(255, 207, 207, 127);
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        renderer.begin(CAMERA, 1, null, 0);
+        assertTrue(renderer.tile(new Marker("t", new LocalPoint(1344, 1344, -1), 0, 1, 1, Marker.NO_FILL, pink, 0, null, false)));
+        assertTrue(renderer.end());
+        int visible = 0;
+        for (int c : alphaCarrier.getFaceColors3()) { if (c != -2) { visible++; assertEquals(FlatModel.hsl(pink), c); } }
+        assertEquals(4, visible);
+    }
+
     @Test public void hullsGoThroughWallsWithTheTiles()
     {
         SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
@@ -509,12 +565,19 @@ public class SceneShapeRendererTest
         assertEquals(FlatModel.hsl(Color.BLUE), alphaCarrier.getFaceColors1()[0]);
         for (int f = 8; f < 12; f++) { assertEquals(-2, alphaCarrier.getFaceColors3()[f]); }
         verify(client).removeRuneLiteObject(any(RuneLiteObjectController.class));
+        // A scene load clears every shape but keeps the models: the next frame reuses them.
         renderer.clear();
         renderer.begin(CAMERA, 1, null, 0);
         renderer.tile(new Marker("moving", new LocalPoint(1472, 1344, -1), 0, 1, 1,
             Color.BLUE, Marker.NO_FILL, 2, null, false));
         assertTrue(renderer.end());
-        assertEquals("clear releases the pool", 2, renderer.carriersCreated());
+        assertEquals("clear keeps the models", 1, renderer.carriersCreated());
+        renderer.reset();
+        renderer.begin(CAMERA, 1, null, 0);
+        renderer.tile(new Marker("moving", new LocalPoint(1472, 1344, -1), 0, 1, 1,
+            Color.BLUE, Marker.NO_FILL, 2, null, false));
+        assertTrue(renderer.end());
+        assertEquals("reset releases the pool", 2, renderer.carriersCreated());
     }
 
     @Test public void npcStylesShareOwnedProjectionButRefreshNextFrame()
@@ -659,5 +722,58 @@ public class SceneShapeRendererTest
         }).when(m).calculateBoundsCylinder();
         when(m.getRadius()).thenAnswer(i -> radius[0]);
         return m;
+    }
+
+    @Test public void aCameraJumpDrawsNothingUntilTheNextFrame()
+    {
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        renderer.begin(CAMERA, 1, null, 0);
+        assertTrue(renderer.tile(new Marker("t", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, Marker.NO_FILL, 2, null, false)));
+        assertTrue(renderer.end());
+        ArgumentCaptor<RuneLiteObjectController> registered = ArgumentCaptor.forClass(RuneLiteObjectController.class);
+        verify(client).registerRuneLiteObject(registered.capture());
+        RuneLiteObjectController o = registered.getValue();
+        assertNotNull(o.getModel());
+        // The client draws with a camera set somewhere else (login, teleport): its widths would not fit.
+        when(client.getCameraFpX()).thenReturn(1344f + 3000);
+        assertNull(o.getModel());
+        when(client.getCameraFpX()).thenReturn(1344f);
+        when(client.getScale()).thenReturn(200);
+        assertNull(o.getModel());
+        // Moving and zooming a little between frames is no jump.
+        when(client.getCameraFpX()).thenReturn(1344f + 60);
+        when(client.getScale()).thenReturn(650);
+        assertNotNull(o.getModel());
+    }
+
+    @Test public void largePolygonsAreSimplifiedToFitOneSceneObject()
+    {
+        // A clickbox close to the camera: a 600 pixel staircase circle of thousands of points.
+        java.util.List<Float> pts = new java.util.ArrayList<>();
+        float lx = Float.NaN, ly = Float.NaN;
+        for (int i = 0; i < 8000; i++)
+        {
+            double t = 2 * Math.PI * i / 8000;
+            float x = Math.round(600 * Math.cos(t) * 4) / 4f, y = Math.round(600 * Math.sin(t) * 4) / 4f;
+            if (x == lx && y == ly) { continue; }
+            if (!Float.isNaN(lx) && x != lx && y != ly) { pts.add(x); pts.add(ly); }
+            pts.add(x); pts.add(y);
+            lx = x; ly = y;
+        }
+        float[] circle = new float[pts.size()];
+        for (int i = 0; i < circle.length; i++) { circle[i] = pts.get(i); }
+        assertTrue(circle.length / 2 > SceneShapeRenderer.MAX_POINTS);
+        float[] fit = SceneShapeRenderer.fit(circle);
+        assertTrue(fit.length / 2 <= SceneShapeRenderer.MAX_POINTS);
+        double area = Math.abs(SceneShapeRenderer.signedArea(circle));
+        assertEquals(area, Math.abs(SceneShapeRenderer.signedArea(fit)), area * 0.005);
+        float[] small = {0, 0, 10, 0, 10, 10};
+        assertSame(small, SceneShapeRenderer.fit(small));
+        ScreenOutline o = new ScreenOutline();
+        float[] x = new float[fit.length / 2], y = new float[x.length], d = new float[x.length];
+        for (int i = 0; i < x.length; i++) { x[i] = fit[i * 2] + 700; y[i] = fit[i * 2 + 1] + 700; d[i] = 500; }
+        assertTrue(o.buildPolygon(x, y, d, x.length, 2));
+        // Border and fill, twice for a light colour's white layer, within half a scene object.
+        assertTrue(2 * o.vertices <= CarrierModels.MAX_VERTICES / 2 && 2 * o.faces <= CarrierModels.MAX_FACES / 2);
     }
 }

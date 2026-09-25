@@ -23,6 +23,13 @@ final class ModelTarget
     final boolean clickbox;
     /** Outline: the model's silhouette, with the line outside it, instead of the convex hull. */
     final boolean outline;
+    /** Depth layer: SceneShapeRenderer.HULL_LAYER, or above it for a plugin's highlight drawn over the others. */
+    int layer = SceneShapeRenderer.HULL_LAYER;
+    /**
+     * Draw RuneLite's own clickbox shape (TileObject.getClickbox), not the float one: for highlights another plugin
+     * drew from it, which must look exactly as that plugin's.
+     */
+    boolean exactClickbox;
     private final Supplier<Shape> fallback;
 
     private ModelTarget(String key, NPC npc, TileObject object, Renderable renderable, int offsetX, int offsetY,

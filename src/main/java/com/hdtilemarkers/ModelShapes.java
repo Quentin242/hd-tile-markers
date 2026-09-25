@@ -18,12 +18,12 @@ final class ModelShapes
     /** Camera state in the same units and conventions as Perspective's GPU projection. */
     static final class Camera
     {
-        final float x, y, z, pitchSin, pitchCos, yawSin, yawCos, scale, centerX, centerY;
+        final float x, y, z, pitch, yaw, pitchSin, pitchCos, yawSin, yawCos, scale, centerX, centerY;
 
         Camera(float x, float y, float z, float pitch, float yaw, int scale,
             int viewportX, int viewportY, int viewportWidth, int viewportHeight)
         {
-            this.x = x; this.y = y; this.z = z;
+            this.x = x; this.y = y; this.z = z; this.pitch = pitch; this.yaw = yaw;
             pitchSin = (float) Math.sin(pitch); pitchCos = (float) Math.cos(pitch);
             yawSin = (float) Math.sin(yaw); yawCos = (float) Math.cos(yaw);
             this.scale = scale;
@@ -37,6 +37,21 @@ final class ModelShapes
             return o == this || o != null && x == o.x && y == o.y && z == o.z && pitchSin == o.pitchSin && pitchCos == o.pitchCos
                 && yawSin == o.yawSin && yawCos == o.yawCos && scale == o.scale && centerX == o.centerX && centerY == o.centerY;
         }
+
+        /**
+         * Whether a camera at these values jumped from this one: set anew (at login, or a teleport), not moved
+         * between two frames. Borders made for this camera would be far too wide or narrow for that one.
+         */
+        boolean jumpedTo(double cx, double cy, double cz, double cpitch, double cyaw, int cscale)
+        {
+            double dx = cx - x, dy = cy - y, dz = cz - z;
+            double turn = Math.abs(Math.IEEEremainder(cyaw - yaw, 2 * Math.PI));
+            return dx * dx + dy * dy + dz * dz > JUMP * JUMP || cscale > scale * 1.5f || scale > cscale * 1.5f
+                || turn > JUMP_TURN || Math.abs(cpitch - pitch) > JUMP_TURN;
+        }
+
+        /** A camera farther than this (local units) or turned more than JUMP_TURN (radians) since the frame jumped. */
+        static final float JUMP = 512, JUMP_TURN = 0.5f;
 
         /** Writes canvas x, canvas y and depth into out. Local x/y are horizontal, z is height (down positive). */
         void project(float lx, float ly, float lz, float[] out)
@@ -128,6 +143,16 @@ final class ModelShapes
     static float projectModel(Camera camera, float[] vx, float[] vy, float[] vz, int n,
         int localX, int localY, int height, int orientation, float[] outX, float[] outY)
     {
+        return projectModel(camera, vx, vy, vz, n, localX, localY, height, orientation, outX, outY, -1);
+    }
+
+    /**
+     * With partialNear >= NEAR, vertices nearer the camera than it are not projected (NaN) instead of failing the whole
+     * model, as RuneLite skips faces with vertices behind the camera; NaN only when no vertex is projected.
+     */
+    static float projectModel(Camera camera, float[] vx, float[] vy, float[] vz, int n,
+        int localX, int localY, int height, int orientation, float[] outX, float[] outY, float partialNear)
+    {
         double angle = (orientation & 2047) * Math.PI / 1024;
         float sin = (float) Math.sin(angle), cos = (float) Math.cos(angle);
         float[] p = new float[3];
@@ -137,10 +162,11 @@ final class ModelShapes
             float rx = vz[i] * sin + vx[i] * cos;
             float rz = vz[i] * cos - vx[i] * sin;
             camera.project(localX + rx, localY + rz, height + vy[i], p);
+            if (partialNear >= NEAR && !(p[2] >= partialNear)) { outX[i] = Float.NaN; outY[i] = Float.NaN; continue; }
             if (!(p[2] >= NEAR)) { return Float.NaN; }
             outX[i] = p[0]; outY[i] = p[1];
             nearest = Math.min(nearest, p[2]);
         }
-        return nearest;
+        return nearest == Float.MAX_VALUE ? Float.NaN : nearest;
     }
 }

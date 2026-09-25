@@ -39,12 +39,9 @@ final class BetterNpcSource
 
 
     /** The clickbox drawn last frame per NPC, for the hover test. */
-    private final java.util.Map<NPC, Shape> drawnClickboxes = new java.util.IdentityHashMap<>();
-    private final java.util.Set<NPC> seen = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
 
     void collect(List<Marker> tiles, List<ModelTarget> models)
     {
-        seen.clear();
         BetterNpcHighlightConfig c = view.config();
         ColorManager colors = view.colors();
         // Respawn timer tiles; their countdown text stays in Better NPC Highlight's 2D code.
@@ -119,17 +116,10 @@ final class BetterNpcSource
                     Color fill = colors.resolveColor(task, c.taskFillColor(), h.getFill(), c.clickboxRave(), c.clickboxRaveSpeed());
                     int lineAlpha = task ? c.taskColor().getAlpha() : h.getColor().getAlpha();
                     int fillAlpha = task ? c.taskFillColor().getAlpha() : h.getFill().getAlpha();
-                    // The original darkens the border while the mouse is over the clickbox. RuneLite's clickbox
-                    // is costly, so the hover test uses the one drawn last frame instead of computing it again.
-                    Shape clickbox = drawnClickboxes.get(npc);
-                    net.runelite.api.Point mouse = client.getMouseCanvasPosition();
-                    if (clickbox != null && mouse != null && clickbox.contains(mouse.getX(), mouse.getY())) { line = line.darker(); }
-                    seen.add(npc);
-                    models.add(ModelTarget.npcClickbox(key, npc, alpha(line, lineAlpha), alpha(fill, fillAlpha), 1, () -> {
-                        Shape shape = clickbox(npc);
-                        drawnClickboxes.put(npc, shape);
-                        return shape;
-                    }));
+                    // The original darkens the border while the mouse is over the clickbox. RuneLite's clickbox is
+                    // costly and the scene draws the NPC's silhouette, so it is only computed with the mouse near.
+                    if (hovered(npc)) { line = line.darker(); }
+                    models.add(ModelTarget.npcClickbox(key, npc, alpha(line, lineAlpha), alpha(fill, fillAlpha), 1, () -> clickbox(npc)));
                     break;
                 }
                 case "outline":
@@ -143,7 +133,18 @@ final class BetterNpcSource
                     break;
             }
         });
-        drawnClickboxes.keySet().retainAll(seen);
+    }
+
+    /** Whether the mouse is over the NPC's clickbox; computed only with the mouse within 300 pixels of the NPC. */
+    private boolean hovered(NPC npc)
+    {
+        net.runelite.api.Point mouse = client.getMouseCanvasPosition();
+        LocalPoint lp = npc.getLocalLocation();
+        if (mouse == null || mouse.getX() < 0 || lp == null) { return false; }
+        net.runelite.api.Point base = Perspective.localToCanvas(client, lp, npc.getWorldView().getPlane());
+        if (base == null || Math.abs(base.getX() - mouse.getX()) > 300 || Math.abs(base.getY() - mouse.getY()) > 300) { return false; }
+        Shape clickbox = clickbox(npc);
+        return clickbox != null && clickbox.contains(mouse.getX(), mouse.getY());
     }
 
     /** Better NPC Highlight's corner style: corner lines of 1/7 of each side, as its renderPolygonCorners. */

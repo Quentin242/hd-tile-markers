@@ -8,7 +8,6 @@
 package com.hdtilemarkers;
 
 import java.awt.Color;
-import java.awt.Shape;
 import java.util.*;
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -30,6 +29,7 @@ final class AgilitySource
 {
     static final String PLUGIN = "net.runelite.client.plugins.agility.AgilityPlugin";
     static final String OVERLAY = "net.runelite.client.plugins.agility.AgilityOverlay";
+    /** The Agility plugin's own limit; HD Tile Markers' draw distance applies when it is larger. */
     private static final int MAX_DISTANCE = 2350;
     private static final Color SHORTCUT_HIGH_LEVEL_COLOR = Color.ORANGE;
     /** OverlayUtil.renderPolygon's fill. */
@@ -38,31 +38,37 @@ final class AgilitySource
     private final Client client;
     private final AgilityPlugin plugin;
     private final AgilityConfig config;
-    /** The clickbox drawn last frame per object, for the hover test, as BetterNpcSource. */
-    private final Map<TileObject, Shape> drawnClickboxes = new IdentityHashMap<>();
+    private final HdTileMarkersConfig hdConfig;
     /** The matched shortcut per object; it does not change while the object exists. */
     private final Map<TileObject, Optional<AgilityShortcut>> shortcuts = new IdentityHashMap<>();
     /** AgilityPlugin.stickTile, which the plugin does not expose: tracked the same way. */
     private Tile stickTile;
 
     @Inject
-    AgilitySource(Client client, AgilityPlugin plugin, ConfigManager configs)
+    AgilitySource(Client client, AgilityPlugin plugin, ConfigManager configs, HdTileMarkersConfig hdConfig)
     {
-        this.client = client; this.plugin = plugin;
+        this.client = client; this.plugin = plugin; this.hdConfig = hdConfig;
         // Read from ConfigManager, not bound in HD Tile Markers' injector (see BetterNpcView.readConfig).
         config = configs.getConfig(AgilityConfig.class);
     }
 
-    void collect(List<Marker> tiles, List<ModelTarget> models)
+    void collect(List<Marker> tiles, List<ModelTarget> models) { collect(tiles, models, Collections.emptySet(), Collections.emptySet()); }
+
+    /**
+     * claimedObjects and claimedTiles (local x << 32 | y) are highlighted by Rooftop Agility Improved: the Agility
+     * plugin's own marks for them are left out, so each obstacle or mark of grace shows one highlight, not both.
+     */
+    void collect(List<Marker> tiles, List<ModelTarget> models, Set<TileObject> claimedObjects, Set<Long> claimedTiles)
     {
         CameraFocusableEntity focus = client.getCameraFocusEntity();
         WorldView wv = client.getTopLevelWorldView();
         if (focus == null || wv == null) { return; }
         LocalPoint player = focus.getCameraFocus();
         int plane = wv.getPlane();
+        // Extended: as far as marked objects are drawn; the plugin's 2350 cuts obstacles off at about 18 tiles.
+        int maxDistance = MarkerSources.pluginRange(hdConfig, MAX_DISTANCE);
         List<Tile> marks = plugin.getMarksOfGrace();
         net.runelite.api.Point mouse = client.getMouseCanvasPosition();
-        Set<TileObject> seen = Collections.newSetFromMap(new IdentityHashMap<>());
         for (TileObject object : plugin.getObstacles().keySet())
         {
             int id = object.getId();
@@ -73,7 +79,7 @@ final class AgilitySource
                 || AgilityObstacles.SEPULCHRE_SKILL_OBSTACLE_IDS.contains(id) && !config.highlightSepulchreSkilling())
             { continue; }
             LocalPoint lp = object.getLocalLocation();
-            if (object.getPlane() != plane || lp == null || lp.distanceTo(player) >= MAX_DISTANCE) { continue; }
+            if (object.getPlane() != plane || lp == null || lp.distanceTo(player) >= maxDistance || claimedObjects.contains(object)) { continue; }
             String key = "agility:" + object.getHash();
             if (AgilityObstacles.TRAP_OBSTACLE_IDS.contains(id))
             {
@@ -88,26 +94,24 @@ final class AgilitySource
                 if (!config.highlightPortals()) { continue; }
                 color = config.getPortalsColor();
             }
-            // Darker while hovered; RuneLite's clickbox is costly, so the one drawn last frame is used for the test.
-            Shape last = drawnClickboxes.get(object);
-            Color border = last != null && mouse != null && last.contains(mouse.getX(), mouse.getY()) ? color.darker() : color;
-            seen.add(object);
+            // Darker while hovered (the clickbox is only computed near the mouse).
+            Color border = HoverClickboxes.hovered(object, mouse) ? color.darker() : color;
             Renderable renderable = renderable(object);
             if (renderable == null) { continue; }
-            models.add(ModelTarget.object(key, object, renderable, 0, 0, border, ColorUtil.colorWithAlpha(color, color.getAlpha() / 5),
-                1, true, () -> {
-                    Shape shape = object.getClickbox();
-                    drawnClickboxes.put(object, shape);
-                    return shape;
-                }));
+            models.add(ModelTarget.object(key, object, renderable, HoverClickboxes.offsetX(object), HoverClickboxes.offsetY(object), border, ColorUtil.colorWithAlpha(color, color.getAlpha() / 5),
+                1, true, object::getClickbox));
         }
-        drawnClickboxes.keySet().retainAll(seen);
         shortcuts.keySet().retainAll(plugin.getObstacles().keySet());
         if (config.highlightMarks())
         {
-            for (Tile mark : marks) { groundTile(tiles, "agility:mark:", mark, player, plane, config.getMarkColor()); }
+            for (Tile mark : marks)
+            {
+                LocalPoint lp = mark.getLocalLocation();
+                if (lp != null && claimedTiles.contains((long) lp.getX() << 32 | lp.getY())) { continue; }
+                groundTile(tiles, "agility:mark:", mark, player, plane, maxDistance, config.getMarkColor());
+            }
         }
-        if (stickTile != null && config.highlightStick()) { groundTile(tiles, "agility:stick:", stickTile, player, plane, config.stickHighlightColor()); }
+        if (stickTile != null && config.highlightStick()) { groundTile(tiles, "agility:stick:", stickTile, player, plane, maxDistance, config.stickHighlightColor()); }
         if (config.highlightSepulchreNpcs())
         {
             for (NPC npc : plugin.getNpcs())
@@ -124,10 +128,10 @@ final class AgilitySource
     }
 
     /** highlightTile: the tile of a ground item, near the player. */
-    private static void groundTile(List<Marker> out, String key, Tile tile, LocalPoint player, int plane, Color color)
+    private static void groundTile(List<Marker> out, String key, Tile tile, LocalPoint player, int plane, int maxDistance, Color color)
     {
         LocalPoint lp = tile.getLocalLocation();
-        if (tile.getPlane() != plane || tile.getItemLayer() == null || lp == null || lp.distanceTo(player) >= MAX_DISTANCE) { return; }
+        if (tile.getPlane() != plane || tile.getItemLayer() == null || lp == null || lp.distanceTo(player) >= maxDistance) { return; }
         Marker m = new Marker(key + lp.getX() + ":" + lp.getY(), lp, plane, 1, 1, color, TILE_FILL, 2, null, false);
         m.layer = Marker.OBJECT;
         out.add(m);

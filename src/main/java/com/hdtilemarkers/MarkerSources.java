@@ -33,6 +33,16 @@ final class MarkerSources
 {
     /** Upper bound of the draw distance option; the loaded area limits it further in practice. */
     static final int MAX_DISTANCE = 200;
+
+    /**
+     * The range in local units for marks of a plugin with its own limit: that limit, or with "Extend plugin ranges"
+     * as far as the draw distance when that is larger.
+     */
+    static int pluginRange(HdTileMarkersConfig config, int own)
+    {
+        return !config.extendRanges() ? own : Math.max(own, Math.max(8, Math.min(MAX_DISTANCE, config.distance())) * 128);
+    }
+
     private final Client client;
     private final ConfigManager configs;
     private final Gson gson;
@@ -106,10 +116,22 @@ final class MarkerSources
         for (WorldView child : wv.worldViews()) { visit(child); }
     }
 
-    private void loadGround(WorldView wv, int region)
+    /** Ground Markers' saved points per region, parsed once per saved text: every scene load read them again. */
+    private final Map<Integer, ParsedGround> parsedGround = new HashMap<>();
+
+    private static final class ParsedGround
     {
-        String json = configs.getConfiguration("groundMarker", "region_" + region);
-        if (json == null || json.isEmpty()) { return; }
+        final String json;
+        final List<GroundPoint> points = new ArrayList<>();
+        boolean invalid;
+        ParsedGround(String json) { this.json = json; }
+    }
+
+    private ParsedGround parseGround(int region, String json)
+    {
+        ParsedGround cached = parsedGround.get(region);
+        if (cached != null && cached.json.equals(json)) { return cached; }
+        ParsedGround parsed = new ParsedGround(json);
         try
         {
             for (JsonElement element : new JsonParser().parse(json).getAsJsonArray())
@@ -117,22 +139,37 @@ final class MarkerSources
                 GroundPoint p = gson.fromJson(element, GroundPoint.class);
                 if (p == null || p.regionId != region || p.regionX < 0 || p.regionX > 63
                     || p.regionY < 0 || p.regionY > 63 || p.z < 0 || p.z > 3)
-                { validGround = false; continue; }
-                WorldPoint world = WorldPoint.fromRegion(region, p.regionX, p.regionY, p.z);
-                for (WorldPoint instance : WorldPoint.toLocalInstance(wv, world))
-                {
-                    LocalPoint local = LocalPoint.fromWorld(wv, instance);
-                    if (local != null)
-                    {
-                        Color color = p.color == null ? groundConfig.markerColor() : p.color;
-                        // Ground Markers' own fill and border width.
-                        ground.add(layer(Marker.GROUND, new Marker("ground:" + wv.getId() + ":" + instance, local, instance.getPlane(), 1, 1, color,
-                            new Color(0, 0, 0, Math.max(0, Math.min(255, groundConfig.fillOpacity()))), groundConfig.borderWidth(), p.label, true)));
-                    }
-                }
+                { parsed.invalid = true; continue; }
+                parsed.points.add(p);
             }
         }
-        catch (RuntimeException ex) { validGround = false; }
+        catch (RuntimeException ex) { parsed.invalid = true; }
+        parsedGround.put(region, parsed);
+        return parsed;
+    }
+
+    private void loadGround(WorldView wv, int region)
+    {
+        String json = configs.getConfiguration("groundMarker", "region_" + region);
+        if (json == null || json.isEmpty()) { return; }
+        ParsedGround parsed = parseGround(region, json);
+        if (parsed.invalid) { validGround = false; }
+        if (parsed.points.isEmpty()) { return; }
+        // Ground Markers' own default colour, fill and border width.
+        Color defaultColor = groundConfig.markerColor();
+        Color fill = new Color(0, 0, 0, Math.max(0, Math.min(255, groundConfig.fillOpacity())));
+        double width = groundConfig.borderWidth();
+        for (GroundPoint p : parsed.points)
+        {
+            WorldPoint world = WorldPoint.fromRegion(region, p.regionX, p.regionY, p.z);
+            for (WorldPoint instance : WorldPoint.toLocalInstance(wv, world))
+            {
+                LocalPoint local = LocalPoint.fromWorld(wv, instance);
+                if (local == null) { continue; }
+                ground.add(layer(Marker.GROUND, new Marker("ground:" + wv.getId() + ":" + instance, local, instance.getPlane(), 1, 1,
+                    p.color == null ? defaultColor : p.color, fill, width, p.label, true)));
+            }
+        }
     }
 
     List<Marker> collect(List<PathMarker.SceneTile> pathTiles)
@@ -222,14 +259,15 @@ final class MarkerSources
             }
         }
         int distance = Math.max(8, Math.min(MAX_DISTANCE, config.distance())) * 128;
+        LocalPoint origin = player.getLocalLocation();
         result.removeIf(m -> {
             WorldView wv = client.getWorldView(m.point.getWorldView());
             // Draw distance limits the many saved markers, not your own tile, destination and path,
             // which can be far away when the renderer draws further than it.
             boolean own = m.key.equals("destination") || m.key.equals("current") || m.key.startsWith("path:");
             return wv == null || m.plane != wv.getPlane() || m.color.getAlpha() == 0 && m.fill.getAlpha() == 0
-                || (!own && m.point.getWorldView() == player.getLocalLocation().getWorldView()
-                    && m.point.distanceTo(player.getLocalLocation()) > distance);
+                || (!own && m.point.getWorldView() == origin.getWorldView()
+                    && m.point.distanceTo(origin) > distance);
         });
         return result;
     }
@@ -444,15 +482,23 @@ final class MarkerSources
                 Renderable renderable = firstRenderable(object);
                 if (renderable != null)
                 {
-                    result.add(ModelTarget.object(key + ":clickbox", object, renderable, 0, 0, o.border, o.otherFill,
+                    result.add(ModelTarget.object(key + ":clickbox", object, renderable, HoverClickboxes.offsetX(object), HoverClickboxes.offsetY(object),
+                        o.border, o.otherFill,
                         o.borderWidth, true, object::getClickbox));
                 }
             }
         }
         LocalPoint origin = player.getLocalLocation();
         int distance = Math.max(8, Math.min(MAX_DISTANCE, config.distance())) * 128;
-        result.removeIf(t -> t.location() == null || t.location().distanceTo(origin) > distance);
-        result.sort(Comparator.comparingInt(t -> t.location().distanceTo(origin)));
+        // Each target's distance once: an object's location() is a new LocalPoint per call.
+        Map<ModelTarget, Integer> distances = new IdentityHashMap<>();
+        for (ModelTarget t : result)
+        {
+            LocalPoint location = t.location();
+            if (location != null) { distances.put(t, location.distanceTo(origin)); }
+        }
+        result.removeIf(t -> { Integer d = distances.get(t); return d == null || d > distance; });
+        result.sort(Comparator.comparingInt(distances::get));
         return result;
     }
 
@@ -573,12 +619,23 @@ final class MarkerSources
     void remove(TileObject object) { objectMarkers.remove(object); visible = null; }
     void add(NPC npc) { npcs.remove(npc); if (isHighlighted(npc)) { npcs.add(npc); } }
     void remove(NPC npc) { npcs.remove(npc); }
-    void removeWorldView(WorldView wv) { objectMarkers.removeWorldView(wv); npcs.removeIf(n -> n.getWorldView() == wv); visible = null; }
+    /** A world view that loaded inside the scene (a boat): its markers, without rebuilding the rest. */
+    void addWorldView(WorldView wv) { removeWorldView(wv); visit(wv); visible = null; }
+
+    void removeWorldView(WorldView wv)
+    {
+        if (wv == null) { return; }
+        objectMarkers.removeWorldView(wv);
+        npcs.removeIf(n -> n.getWorldView() == wv);
+        ground.removeIf(m -> m.point.getWorldView() == wv.getId());
+        tilePackMarkers.removeIf(m -> m.point.getWorldView() == wv.getId());
+        visible = null;
+    }
     boolean validGround() { return validGround; }
     boolean validObjects() { return objectMarkers.valid(); }
     void clear() { styles.clear(); colors.clear(); visible = null; predicted = null; predictedWorld = null; predictionConfirmed = false;
         lastPlayerTile = null; lastDestination = null; stillSince = 0; arrivedAt = 0; lastHit = 0;
-        tilePackMarkers.clear(); tilePacks.clear(); ground.clear(); npcs.clear(); objectMarkers.clear(); npcHighlights = Collections.emptyList(); validGround = true; }
+        tilePackMarkers.clear(); ground.clear(); npcs.clear(); objectMarkers.clear(); npcHighlights = Collections.emptyList(); validGround = true; }
 
     private static final class GroundPoint
     {

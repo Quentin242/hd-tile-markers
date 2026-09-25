@@ -159,5 +159,7 @@ final class StealingArtefactsSource
     @Subscribe public void onGameStateChanged(GameStateChanged e)
     {
         if (e.getGameState() == GameState.LOGGING_IN || e.getGameState() == GameState.LOGIN_SCREEN || e.getGameState() == GameState.HOPPING) { clear(); }
+        // A load spawns the scene's objects anew (NPCs in view stay).
+        else if (e.getGameState() == GameState.LOADING) { objects.clear(); }
     }
 }

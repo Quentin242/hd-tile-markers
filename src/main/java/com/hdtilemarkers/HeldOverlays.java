@@ -28,14 +28,30 @@ final class HeldOverlays
         this.overlays = overlays; this.plugins = plugins; this.pluginClass = pluginClass; this.match = match;
     }
 
-    /** Whether that plugin is running; matched by class name, as HD Tile Markers has no compile-time dependency on it. */
+    /** Bumped when plugins are loaded, unloaded, started or stopped: the plugin found by class name is looked up again. */
+    private static volatile int generation;
+    private int foundIn = -1;
+    private Plugin plugin;
+
+    static void pluginsChanged() { generation++; }
+
+    /**
+     * Whether that plugin is running; matched by class name, as HD Tile Markers has no compile-time dependency on it.
+     * The plugin is looked up once per change of the plugin list, not every tick for every held plugin.
+     */
     boolean running()
     {
-        for (Plugin p : plugins.getPlugins())
+        int now = generation;
+        if (foundIn != now)
         {
-            if (p.getClass().getName().equals(pluginClass)) { return plugins.isPluginActive(p); }
+            plugin = null;
+            for (Plugin p : plugins.getPlugins())
+            {
+                if (p.getClass().getName().equals(pluginClass)) { plugin = p; break; }
+            }
+            foundIn = now;
         }
-        return false;
+        return plugin != null && plugins.isPluginActive(plugin);
     }
 
     /** Whether HD Tile Markers draws that plugin's marks this tick. */
@@ -58,6 +74,9 @@ final class HeldOverlays
         }
         else { restore(running, stillShown); }
     }
+
+    /** The overlays held back now. */
+    List<Overlay> held() { return java.util.Collections.unmodifiableList(held); }
 
     void restore(boolean running, Predicate<Overlay> stillShown)
     {

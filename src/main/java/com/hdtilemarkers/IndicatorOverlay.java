@@ -43,6 +43,13 @@ final class IndicatorOverlay extends Overlay
 
     @Override public Dimension render(Graphics2D graphics)
     {
+        long start = System.nanoTime();
+        try { return draw(graphics); }
+        finally { plugin.time("2d overlay", System.nanoTime() - start); }
+    }
+
+    private Dimension draw(Graphics2D graphics)
+    {
         Graphics2D g = (Graphics2D) graphics.create();
         try
         {
@@ -83,6 +90,11 @@ final class IndicatorOverlay extends Overlay
                 finally { bnh.dispose(); }
             }
             for (NPC guard : plugin.stealingArrows()) { facingArrow(g, guard); }
+            // Shortest Path's overlay, run once: its tile fills and lines go to the scene, its text is drawn here.
+            java.util.List<Overlay> shortestPath = plugin.shortestPathOverlays();
+            if (!shortestPath.isEmpty()) { plugin.shortestPath().render(shortestPath, g); }
+            // Core plugins' overlays (Ground Items, Fishing, Cannon, ...), run once the same way.
+            plugin.renderCaptured(g);
             // The Gauntlet's resource icons, as its MazeOverlay draws them.
             for (java.util.Map.Entry<net.runelite.api.coords.LocalPoint, java.awt.image.BufferedImage> icon : plugin.gauntletIcons().entrySet())
             {
@@ -226,7 +238,7 @@ final class IndicatorOverlay extends Overlay
         Polygon result = new Polygon();
         for (int i = 0; i < 4; i++)
         {
-            Point p = Perspective.localToCanvas(client, m.point.plus(dx[i], dy[i]), m.plane);
+            Point p = Perspective.localToCanvas(client, m.where().plus(dx[i], dy[i]), m.plane);
             if (p == null) { return null; }
             result.addPoint(p.getX(), p.getY());
         }

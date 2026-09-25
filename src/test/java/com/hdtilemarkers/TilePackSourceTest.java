@@ -60,4 +60,18 @@ public class TilePackSourceTest
         assertEquals(3.5f, markers.get(0).borderWidth, 0);
         assertEquals("A", markers.get(0).label);
     }
+
+    /** Tile Packs 2: each pack under its own pack_<id> key; entries without tiles only store panel visibility. */
+    @Test public void customPacksSavedPerKeyAreDrawn()
+    {
+        when(configs.getConfiguration(TilePackSource.DATA_GROUP, "packs")).thenReturn("[10000]");
+        when(configs.getConfigurationKeys("tilePacks.pack_")).thenReturn(java.util.Arrays.asList("tilePacks.pack_10000", "tilePacks.pack_5"));
+        when(configs.getConfiguration(TilePackSource.DATA_GROUP, "pack_10000")).thenReturn(
+            "{\"id\":10000,\"packName\":\"mine\",\"visible\":false,\"packTiles\":\"[{\\\"regionId\\\":11850,\\\"regionX\\\":5,\\\"regionY\\\":5,\\\"z\\\":0,\\\"color\\\":\\\"#FF00FF00\\\",\\\"label\\\":\\\"A\\\"}]\"}");
+        when(configs.getConfiguration(TilePackSource.DATA_GROUP, "pack_5")).thenReturn("{\"id\":5,\"visible\":false}");
+        List<Marker> markers = new TilePackSource(configs, GSON).markers(wv);
+        assertEquals(1, markers.size());
+        assertEquals(new Color(0, 255, 0), markers.get(0).color);
+        assertEquals("A", markers.get(0).label);
+    }
 }

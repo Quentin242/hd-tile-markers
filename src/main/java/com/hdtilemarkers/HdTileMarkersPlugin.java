@@ -39,13 +39,19 @@ import org.slf4j.LoggerFactory;
 @PluginDependency(net.runelite.client.plugins.slayer.SlayerPlugin.class)
 public class HdTileMarkersPlugin extends Plugin
 {
-    static final int MAX_TILES = 1500, MAX_MODELS = 64;
+    /**
+     * Hulls, clickboxes and outlines beyond MAX_MODELS (nearest first) fall back to 2D, where RuneLite's outline renderer
+     * is far costlier than the scene: many NPCs marked with every style (a field of cows) passed 64 and slowed down.
+     */
+    static final int MAX_TILES = 1500, MAX_MODELS = 256;
     private static final Logger log = LoggerFactory.getLogger(HdTileMarkersPlugin.class);
     @Inject private Client client;
     @Inject private ClientThread clientThread;
     @Inject private EventBus eventBus;
     @Inject private HdTileMarkersConfig config;
     @Inject private MarkerSources sources;
+    @Inject private TilePackSource tilePacks;
+    @Inject private ObjectMarkerSource objectMarkers;
     @Inject private SceneShapeRenderer renderer;
     @Inject private PathMarker pathMarker;
     @Inject private com.hdtilemarkers.betternpc.BetterNpcEvents betterNpcEvents;
@@ -57,6 +63,12 @@ public class HdTileMarkersPlugin extends Plugin
     @Inject private AggroAreaSource aggroArea;
     @Inject private GauntletSource gauntlet;
     @Inject private AgilitySource agility;
+    @Inject private BlastFurnaceSource blastFurnace;
+    @Inject private AbyssSource abyss;
+    @Inject private PyramidPlunderSource pyramidPlunder;
+    @Inject private RoguesDenSource roguesDen;
+    @Inject private StarInfoSource starInfo;
+    @Inject private ShortestPathSource shortestPath;
     @Inject private IndicatorOverlay overlay;
     @Inject private RenderTrace trace;
     @Inject private net.runelite.client.callback.RenderCallbackManager renderCallbacks;
@@ -69,7 +81,59 @@ public class HdTileMarkersPlugin extends Plugin
     private GroundMarkerOverlay originalGround;
     private Overlay originalObjects;
     /** Plugin Hub plugins' scene overlays, held back while HD Tile Markers draws their marks (matched by class name). */
-    private HeldOverlays heldBetterNpc, heldTilePacks, heldStealing, heldSailing, heldAggroArea, heldGauntlet, heldAgility;
+    private HeldOverlays heldBetterNpc, heldTilePacks, heldStealing, heldSailing, heldAggroArea, heldGauntlet, heldAgility, heldShortestPath, heldBlastFurnace, heldAbyss, heldPyramidPlunder, heldRoguesDen, heldStarInfo;
+    /**
+     * Overlays whose clickboxes and hulls HD Tile Markers draws live (their sources) still run each frame on a
+     * TileCapture that drops those shapes: their tiles go to the scene, their text, bars and side effects (Pyramid
+     * Plunder hides its timer widget there) stay theirs.
+     */
+    private TileCapture pyramidPlunderCapture, roguesDenCapture, starInfoCapture;
+    /**
+     * Plugins whose tile highlights HD Tile Markers draws, captured from their own overlays (TileCapture):
+     * plugin class, then the overlay classes held back. Their text, icons, timers and clickboxes stay 2D.
+     */
+    private static final String ROOFTOPS = "tictac7x.rooftops.TicTac7xRooftopsPlugin";
+    private static final String[][] CAPTURED = {
+        {"net.runelite.client.plugins.grounditems.GroundItemsPlugin", "net.runelite.client.plugins.grounditems.GroundItemsOverlay"},
+        {"net.runelite.client.plugins.fishing.FishingPlugin", "net.runelite.client.plugins.fishing.FishingSpotOverlay"},
+        {"net.runelite.client.plugins.implings.ImplingsPlugin", "net.runelite.client.plugins.implings.ImplingsOverlay"},
+        {"net.runelite.client.plugins.cannon.CannonPlugin", "net.runelite.client.plugins.cannon.CannonOverlay",
+            "net.runelite.client.plugins.cannon.CannonSpotOverlay"},
+        {"net.runelite.client.plugins.party.PartyPlugin", "net.runelite.client.plugins.party.PartyPingOverlay"},
+        {"net.runelite.client.plugins.herbiboars.HerbiboarPlugin", "net.runelite.client.plugins.herbiboars.HerbiboarOverlay"},
+        {"net.runelite.client.plugins.zalcano.ZalcanoPlugin", "net.runelite.client.plugins.zalcano.ZalcanoOverlay"},
+        {"net.runelite.client.plugins.pestcontrol.PestControlPlugin", "net.runelite.client.plugins.pestcontrol.PestControlOverlay"},
+        {"net.runelite.client.plugins.kourendlibrary.KourendLibraryPlugin", "net.runelite.client.plugins.kourendlibrary.KourendLibraryOverlay"},
+        {"net.runelite.client.plugins.blastmine.BlastMinePlugin", "net.runelite.client.plugins.blastmine.BlastMineRockOverlay"},
+        {"net.runelite.client.plugins.mta.MTAPlugin", "net.runelite.client.plugins.mta.MTASceneOverlay"},
+        {"net.runelite.client.plugins.woodcutting.WoodcuttingPlugin", "net.runelite.client.plugins.woodcutting.WoodcuttingSceneOverlay"},
+        // Player Indicators: the tiles under highlighted players (followed while they walk); names and ranks stay 2D.
+        {"net.runelite.client.plugins.playerindicators.PlayerIndicatorsPlugin", "net.runelite.client.plugins.playerindicators.PlayerIndicatorsTileOverlay"},
+        // Plugin Hub plugins, the same way: matched by class name, no compile-time dependency.
+        {"tictac7x.motherlode.TicTac7xMotherlodePlugin", "tictac7x.motherlode.rockfalls.Rockfalls"},
+        {"com.stopmisclickingtiles.StopMisclickingTilesPlugin", "com.stopmisclickingtiles.TileOverlay"},
+        {"com.GameTickInfo.GameTickInfoPlugin", "com.GameTickInfo.MarkedTilesOverlay"},
+        {"com.cluedetails.ClueDetailsPlugin", "com.cluedetails.ClueGroundOverlay"},
+        {"com.spawnpredictor.SpawnPredictorPlugin", "com.spawnpredictor.overlays.DisplayModeOverlay"},
+        // Mahogany Homes: the clickboxes of the furniture and stairs it highlights, found by ShapeIdentifier.
+        {"thestonedturtle.mahoganyhomes.MahoganyHomesPlugin", "thestonedturtle.mahoganyhomes.MahoganyHomesHighlightOverlay"},
+        // Quest Helper: its target tiles, and with its hull or clickbox styles its NPCs and objects (ShapeIdentifier);
+        // its outline style draws past the overlay's graphics and stays its own. Its world lines are captured as lines
+        // (LINE_OVERLAYS); its arrows and icons stay 2D.
+        // Rooftop Agility Improved: its obstacle clickboxes (ShapeIdentifier) and marks of grace; the Agility plugin's
+        // marks for the same obstacles and tiles are left out (AgilitySource), so each shows once, in its course colours.
+        {ROOFTOPS, "tictac7x.rooftops.Overlay"},
+        {"com.questhelper.QuestHelperPlugin", "com.questhelper.overlays.QuestHelperWorldOverlay"},
+        {"com.questhelper.QuestHelperPlugin", "com.questhelper.overlays.QuestHelperWorldLineOverlay"},
+    };
+    /** Captured overlays whose lines lie on the ground and become scene lines (TileCapture.captureLines). */
+    private static final java.util.Set<String> LINE_OVERLAYS = java.util.Collections.singleton("com.questhelper.overlays.QuestHelperWorldLineOverlay");
+    /** Captured overlays whose clickboxes and hulls are matched to their object or NPC and drawn live (ShapeIdentifier). */
+    private static final java.util.Set<String> IDENTIFY_OVERLAYS = new java.util.HashSet<>(java.util.Arrays.asList(
+        "thestonedturtle.mahoganyhomes.MahoganyHomesHighlightOverlay", "com.questhelper.overlays.QuestHelperWorldOverlay",
+        "tictac7x.rooftops.Overlay"));
+    private final List<HeldOverlays> heldCaptured = new ArrayList<>();
+    private final List<TileCapture> captures = new ArrayList<>();
     private static final java.util.Set<String> STEALING_OVERLAYS = new java.util.HashSet<>(java.util.Arrays.asList(
         "StealingArtefactsHouseOverlay", "StealingArtefactsPatrolOverlay", "StealingArtefactsKhaledOverlay"));
     private volatile boolean running, dirty, failed;
@@ -88,9 +152,14 @@ public class HdTileMarkersPlugin extends Plugin
 
     @Override protected void startUp()
     {
-        running = true; dirty = true; failed = false; sceneUnavailable = false;
+        running = true; dirty = true; scanScene = true; failed = false; sceneUnavailable = false;
+        // Config and plugin changes while stopped were not delivered to this instance.
+        tilePacks.clear();
+        objectMarkers.clearPoints();
+        HeldOverlays.pluginsChanged();
         // The shadow transparency notice shows again after turning the plugin on (or installing it).
         warnedShadowTransparency = false;
+        warnedQuestHelper = false;
         if (heldBetterNpc == null)
         {
             heldBetterNpc = new HeldOverlays(overlays, plugins, "com.betternpchighlight.BetterNpcHighlightPlugin",
@@ -101,10 +170,36 @@ public class HdTileMarkersPlugin extends Plugin
             heldStealing = new HeldOverlays(overlays, plugins, "io.cbitler.stealingartefacts.StealingArtefactsPlugin",
                 o -> STEALING_OVERLAYS.contains(o.getClass().getSimpleName()) && o.getClass().getName().startsWith("io.cbitler.stealingartefacts."));
             heldAgility = new HeldOverlays(overlays, plugins, AgilitySource.PLUGIN, o -> o.getClass().getName().equals(AgilitySource.OVERLAY));
+            heldBlastFurnace = new HeldOverlays(overlays, plugins, BlastFurnaceSource.PLUGIN, o -> o.getClass().getName().equals(BlastFurnaceSource.OVERLAY));
+            heldAbyss = new HeldOverlays(overlays, plugins, AbyssSource.PLUGIN, o -> o.getClass().getName().equals(AbyssSource.OVERLAY));
+            heldPyramidPlunder = new HeldOverlays(overlays, plugins, PyramidPlunderSource.PLUGIN,
+                o -> o.getClass().getName().equals(PyramidPlunderSource.OVERLAY));
+            heldRoguesDen = new HeldOverlays(overlays, plugins, RoguesDenSource.PLUGIN, o -> o.getClass().getName().equals(RoguesDenSource.OVERLAY));
+            heldStarInfo = new HeldOverlays(overlays, plugins, StarInfoSource.PLUGIN, o -> o.getClass().getName().equals(StarInfoSource.OVERLAY));
+            pyramidPlunderCapture = new TileCapture(client, "pyramidplunder:tile:", true);
+            roguesDenCapture = new TileCapture(client, "roguesden:tile:", true);
+            starInfoCapture = new TileCapture(client, "starinfo:tile:", true);
             heldGauntlet = new HeldOverlays(overlays, plugins, GauntletSource.PLUGIN, o -> o.getClass().getName().equals(GauntletSource.OVERLAY));
             heldAggroArea = new HeldOverlays(overlays, plugins, AggroAreaSource.PLUGIN, o -> o.getClass().getName().equals(AggroAreaSource.OVERLAY));
+            heldShortestPath = new HeldOverlays(overlays, plugins, ShortestPathSource.PLUGIN,
+                o -> o.getClass().getName().equals(ShortestPathSource.OVERLAY));
             heldSailing = new HeldOverlays(overlays, plugins, "com.duckblade.osrs.sailing.SailingPlugin",
                 o -> SailingSource.OVERLAYS.contains(o.getClass().getSimpleName()) && o.getClass().getName().startsWith(SailingSource.PACKAGE));
+            for (String[] captured : CAPTURED)
+            {
+                java.util.Set<String> classes = new java.util.HashSet<>(java.util.Arrays.asList(captured).subList(1, captured.length));
+                heldCaptured.add(new HeldOverlays(overlays, plugins, captured[0], o -> classes.contains(o.getClass().getName())));
+                String name = captured[0].substring(captured[0].lastIndexOf('.') + 1).replace("Plugin", "").toLowerCase();
+                boolean lines = LINE_OVERLAYS.containsAll(classes);
+                boolean identify = !java.util.Collections.disjoint(IDENTIFY_OVERLAYS, classes);
+                TileCapture capture = new TileCapture(client, name + (lines ? ":lines:" : ":"), false, lines, identify);
+                if (captured[0].equals(ROOFTOPS))
+                {
+                    capture.markLayer = Marker.OBJECT + 1;
+                    capture.modelLayer = SceneShapeRenderer.HULL_LAYER + 1;
+                }
+                captures.add(capture);
+            }
         }
         overlays.add(overlay);
         tracing(config.debug());
@@ -116,6 +211,10 @@ public class HdTileMarkersPlugin extends Plugin
         eventBus.register(externalMarks);
         eventBus.register(gauntlet);
         eventBus.register(agility);
+        eventBus.register(blastFurnace);
+        eventBus.register(abyss);
+        eventBus.register(roguesDen);
+        eventBus.register(starInfo);
         clientThread.invokeLater(betterNpcEvents::startUp);
     }
 
@@ -132,14 +231,24 @@ public class HdTileMarkersPlugin extends Plugin
         eventBus.unregister(externalMarks);
         eventBus.unregister(gauntlet);
         eventBus.unregister(agility);
+        eventBus.unregister(blastFurnace);
+        eventBus.unregister(abyss);
+        eventBus.unregister(roguesDen);
+        eventBus.unregister(starInfo);
         externalMarks.clear();
         betterNpcEvents.shutDown();
-        clientThread.invoke(() -> { if (!running) { reset(); sources.clear(); } });
+        clientThread.invoke(() -> { if (!running) { reset(true); sources.clear(); } });
     }
 
-    private void reset()
+    private void reset() { reset(false); }
+
+    /**
+     * Drops every mark. The scene objects' models are kept for reuse (a scene load needed them all again, and making
+     * and uploading them anew stalled the first frames after it), except when the plugin stops or fails (all).
+     */
+    private void reset(boolean all)
     {
-        renderer.reset();
+        if (all) { renderer.reset(); } else { renderer.clear(); }
         markers = Collections.emptyList();
         modelTargets = Collections.emptyList();
         hover = null;
@@ -147,28 +256,88 @@ public class HdTileMarkersPlugin extends Plugin
         sceneShapes = 0;
         restoreGround();
         restoreObjects();
-        for (HeldOverlays held : new HeldOverlays[]{heldBetterNpc, heldTilePacks, heldStealing, heldSailing, heldAggroArea, heldGauntlet, heldAgility})
+        shortestPath.clear();
+        for (TileCapture capture : captures) { capture.clear(); }
+        for (TileCapture capture : new TileCapture[]{pyramidPlunderCapture, roguesDenCapture, starInfoCapture})
+        {
+            if (capture != null) { capture.clear(); }
+        }
+        for (HeldOverlays held : heldCaptured) { held.reset(); }
+        for (HeldOverlays held : new HeldOverlays[]{heldBetterNpc, heldTilePacks, heldStealing, heldSailing, heldAggroArea, heldGauntlet, heldAgility, heldShortestPath, heldBlastFurnace, heldAbyss, heldPyramidPlunder, heldRoguesDen, heldStarInfo})
         {
             if (held != null) { held.reset(); }
         }
     }
 
     /** Collects markers once per client tick; the scene is written in onBeforeRender. */
+    /** Diagnostics: frame times per part, logged every few seconds while debug info is shown. */
+    private final FrameTimes times = new FrameTimes();
+
     @Subscribe public void onPostClientTick(PostClientTick event)
+    {
+        long start = System.nanoTime();
+        try { collectTick(); }
+        finally { if (config.debug()) { times.add("tick", System.nanoTime() - start); } }
+    }
+
+    /** Whether the next rebuild also scans the scene for the sources that follow spawn events (after starting). */
+    private boolean scanScene = true;
+
+    /** Everything from the scene again (after a load or a change); with debug info, how long each part took. */
+    private void rebuild()
+    {
+        WorldView top = client.getTopLevelWorldView();
+        long[] at = {System.nanoTime()};
+        StringBuilder parts = config.debug() ? new StringBuilder() : null;
+        java.util.function.Consumer<String> done = part ->
+        {
+            long now = System.nanoTime();
+            if (parts != null) { parts.append(parts.length() == 0 ? "" : ", ").append(part).append(' ').append(String.format("%.1f", (now - at[0]) / 1e6)); }
+            at[0] = now;
+        };
+        reset(); done.accept("reset");
+        sources.rebuild(); done.accept("markers");
+        sailing.rebuild(top); done.accept("sailing");
+        // These follow spawn events, which a scene load sends for every object: the scene is scanned for them only
+        // once, for what was there before HD Tile Markers started.
+        if (scanScene)
+        {
+            stealingArtefacts.rebuild(top); done.accept("stealing");
+            gauntlet.rebuild(top); done.accept("gauntlet");
+            blastFurnace.rebuild(top); done.accept("blastFurnace");
+            abyss.rebuild(top); done.accept("abyss");
+            roguesDen.rebuild(top); done.accept("roguesDen");
+            starInfo.rebuild(top); done.accept("starInfo");
+            scanScene = false;
+        }
+        dirty = false;
+        rebuilds++;
+        if (parts != null) { log.info("HD Tile Markers rebuild ({}), ms: {}", lastRebuild, parts); }
+    }
+
+    private void collectTick()
     {
         if (!running || client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null) { return; }
         try
         {
-            if (dirty) { reset(); sources.rebuild(); stealingArtefacts.rebuild(client.getTopLevelWorldView()); sailing.rebuild(client.getTopLevelWorldView()); gauntlet.rebuild(client.getTopLevelWorldView()); dirty = false; rebuilds++; }
+            long start = System.nanoTime();
+            if (dirty) { rebuild(); }
+            long rebuilt = System.nanoTime();
+            time("tick rebuild", rebuilt - start);
             sources.groundEnabled = plugins.isPluginEnabled(groundPlugin);
             sources.objectsEnabled = plugins.isPluginEnabled(objectPlugin);
             sources.npcsEnabled = plugins.isPluginEnabled(npcPlugin);
-            // The integrations below add to these lists.
-            List<Marker> tiles = new ArrayList<>(sources.collect(pathTiles()));
-            List<ModelTarget> models = new ArrayList<>(sources.modelTargets());
             // Replace the original overlays unless the scene route has actually failed. Without GPU
             // HD Tile Markers draws 2D itself; merely not having drawn a frame yet (start-up) is not a failure.
             boolean drawing = !client.isGpu() || sceneActive();
+            // Tile Packs before collecting, so its tiles and its held overlay switch in the same tick.
+            heldTilePacks.update(drawing, o -> true);
+            sources.tilePacksEnabled = heldTilePacks.drawing();
+            // The integrations below add to these lists.
+            List<Marker> tiles = new ArrayList<>(sources.collect(pathTiles()));
+            List<ModelTarget> models = new ArrayList<>(sources.modelTargets());
+            long collected = System.nanoTime();
+            time("tick markers", collected - rebuilt);
             // Plugin Hub plugins: only while the plugin runs and the scene route works; otherwise its own overlay draws.
             heldBetterNpc.update(sceneActive(), o -> true);
             if (heldBetterNpc.drawing())
@@ -203,18 +372,77 @@ public class HdTileMarkersPlugin extends Plugin
             heldAgility.update(sceneActive(), o -> true);
             if (heldAgility.drawing())
             {
-                agility.collect(tiles, models);
+                // What Rooftop Agility Improved highlighted last frame is left to it: one highlight per obstacle.
+                java.util.Set<TileObject> claimedObjects = Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+                java.util.Set<Long> claimedTiles = new java.util.HashSet<>();
+                for (int i = 0; i < captures.size(); i++)
+                {
+                    if (CAPTURED[i][0].equals(ROOFTOPS) && heldCaptured.get(i).drawing())
+                    {
+                        captures.get(i).objects(claimedObjects);
+                        captures.get(i).tiles(claimedTiles);
+                    }
+                }
+                agility.collect(tiles, models, claimedObjects, claimedTiles);
             }
+            // Blast Furnace: the conveyor belt and bar dispenser clickboxes; its coffer and bar overlays stay its own.
+            heldBlastFurnace.update(sceneActive(), o -> true);
+            if (heldBlastFurnace.drawing())
+            {
+                blastFurnace.collect(models);
+            }
+            // Runecraft: the Abyss rift clickboxes; its pouch and minimap overlays stay its own.
+            heldAbyss.update(sceneActive(), o -> true);
+            if (heldAbyss.drawing())
+            {
+                abyss.collect(models);
+            }
+            // Pyramid Plunder: container hulls, door and speartrap clickboxes.
+            heldPyramidPlunder.update(sceneActive() && pyramidPlunderCapture.usable(), o -> true);
+            if (heldPyramidPlunder.drawing())
+            {
+                pyramidPlunder.collect(models);
+                pyramidPlunderCapture.collect(tiles);
+            }
+            // Rogues' Den: obstacle clickboxes, and its hint tiles; the hint text stays its own.
+            heldRoguesDen.update(sceneActive() && roguesDenCapture.usable(), o -> true);
+            if (heldRoguesDen.drawing())
+            {
+                roguesDen.collect(models);
+                roguesDenCapture.collect(tiles);
+            }
+            // Star Info: the star's hull; its tier text and health bar stay its own.
+            heldStarInfo.update(sceneActive() && starInfoCapture.usable(), o -> true);
+            if (heldStarInfo.drawing())
+            {
+                starInfo.collect(models);
+                starInfoCapture.collect(tiles);
+            }
+            // Shortest Path: the tiles and lines its held path overlay draws; its text is drawn in 2D by IndicatorOverlay.
+            // With its debug overlays (transports, collision map) on, its own overlay stays.
+            heldShortestPath.update(sceneActive() && shortestPath.usable(), o -> true);
+            if (heldShortestPath.drawing())
+            {
+                shortestPath.collect(tiles);
+            }
+            // Core plugins' tile highlights, captured from their overlays; their text and icons are drawn in 2D by IndicatorOverlay.
+            for (int i = 0; i < captures.size(); i++)
+            {
+                heldCaptured.get(i).update(sceneActive() && captures.get(i).usable(), o -> true);
+                if (heldCaptured.get(i).drawing()) { captures.get(i).collect(tiles, models); }
+            }
+            warnQuestHelperOutlines();
             // Marks other plugins sent through PluginMessage.
             externalMarks.collect(tiles, models);
             markers = tiles;
             modelTargets = models;
+            long integrated = System.nanoTime();
+            time("tick plugins", integrated - collected);
             if (config.ground() && config.replaceGround() && sources.validGround() && drawing) { suppressGround(); }
             else { restoreGround(); }
             if (config.objectMarkers() && config.replaceObjectMarkers() && sources.validObjects() && drawing) { suppressObjects(); }
             else { restoreObjects(); }
-            heldTilePacks.update(drawing, o -> true);
-            sources.tilePacksEnabled = heldTilePacks.drawing();
+            time("tick overlays", System.nanoTime() - integrated);
         }
         catch (RuntimeException ex)
         {
@@ -223,9 +451,53 @@ public class HdTileMarkersPlugin extends Plugin
     }
 
     /** Rebuilds all scene shapes for the camera of the frame about to be drawn. */
+    /**
+     * Game ticks since logging in: nothing is drawn before the first, when the camera is not yet set and a mark was
+     * drawn as a large square for a frame. Only after a login, not after loading a new area, which then drew nothing
+     * for a moment. Counted here, as the client's tick count restarts at login; starts high, so turning the plugin on
+     * while logged in draws at once.
+     */
+    private int ticksSinceLogin = Integer.MAX_VALUE;
+    /** Logging in, until logged in: a login may pass through LOADING first. */
+    private boolean loggingIn;
+
     @Subscribe public void onBeforeRender(BeforeRender event)
     {
+        long start = System.nanoTime();
+        try { renderScene(); }
+        finally
+        {
+            if (config.debug())
+            {
+                times.add("scene", System.nanoTime() - start);
+                times.add("outlines", renderer.outlineNanos());
+                times.add("clickboxes", renderer.clickboxNanos());
+                times.add("player cut", renderer.playerCutNanos());
+                String report = times.frame(markers.size() + " tiles, " + modelTargets.size() + " models" + identifiedStatus() + renderer.leftOut());
+                if (report != null) { log.info(report); renderer.resetLeftOut(); }
+            }
+        }
+    }
+
+    /** Diagnostics: per plugin whose clickboxes and hulls are identified, found/tried last frame and the last miss. */
+    private String identifiedStatus()
+    {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < captures.size(); i++)
+        {
+            String status = heldCaptured.get(i).drawing() ? captures.get(i).identifierStatus() : null;
+            if (status != null) { out.append(", identified ").append(CAPTURED[i][0].substring(CAPTURED[i][0].lastIndexOf('.') + 1)).append(' ').append(status); }
+        }
+        return out.toString();
+    }
+
+    /** Diagnostics: a part of the frame, while debug info is shown. */
+    void time(String part, long nanos) { if (config.debug()) { times.add(part, nanos); } }
+
+    private void renderScene()
+    {
         if (!running || dirty || client.getGameState() != GameState.LOGGED_IN || client.getLocalPlayer() == null) { return; }
+        if (ticksSinceLogin < 1) { renderer.clear(); sceneReady = false; return; }
         if (!client.isGpu() || failed)
         {
             renderer.clear();
@@ -243,16 +515,25 @@ public class HdTileMarkersPlugin extends Plugin
             // With its shadow transparency on every visible face casts (threshold 0.01): nothing to gain there.
             boolean capped = hdShadows && !transparentShadows;
             renderer.floatingAlphaCap = capped ? SceneShapeRenderer.HD_CAP_OPAQUE_SHADOWS : 255;
+            // 117 HD's default shading caps the lightness of coloured faces; with its legacy grey colours even grey is
+            // capped, so white cannot help there.
+            String shading = configManager.getConfiguration("hd", "experimentalShadingMode");
+            renderer.hdLightnessCap = hdActive() && (shading == null || "DEFAULT".equals(shading))
+                && !"true".equals(configManager.getConfiguration("hd", "legacyGreyColors"));
             if (hdShadows && transparentShadows) { warnShadowTransparency(); }
             renderer.begin(camera, 1f / stretchScale(), xray, player.getWorldView().getPlane());
             int drawn = 0;
             hover = sources.hover();
-            if (hover != null && !config.hoveredTileIn2d() && renderer.tile(hover)) { drawn++; }
+            // The player's silhouette is left uncovered by marks through walls.
+            renderer.cutAround(config.charactersInFrontOfTiles() ? player : null);
             // Beyond the limit, tiles keep their 2D fallback rather than being dropped.
             if (markers.size() <= MAX_TILES)
             {
                 for (Marker m : markers) { if (renderer.tile(m)) { drawn++; } }
             }
+            // The hovered tile last: shapes of one tile are drawn in the order they are added, so it lies over the
+            // tiles under it with its own opacity.
+            if (hover != null && !config.hoveredTileIn2d() && renderer.tile(hover)) { drawn++; }
             for (int i = 0; i < Math.min(MAX_MODELS, modelTargets.size()); i++)
             {
                 if (renderer.model(modelTargets.get(i))) { drawn++; }
@@ -371,7 +652,7 @@ public class HdTileMarkersPlugin extends Plugin
     {
         if (!failed) { log.warn("Scene markers unavailable; using 2D markers and the original ground overlay", ex); }
         failed = true;
-        reset();
+        reset(true);
     }
 
     /** Canvas pixels per screen pixel is 1 / this; the GPU scene is rasterized at the stretched size. */
@@ -456,11 +737,41 @@ public class HdTileMarkersPlugin extends Plugin
     }
 
     @Subscribe public void onGameStateChanged(GameStateChanged e)
-    { if (e.getGameState() != GameState.LOGGED_IN) { reset(); sources.clear(); dirty = true; failed = false; } }
-    @Subscribe public void onWorldViewLoaded(WorldViewLoaded e) { dirty = true; lastRebuild = "worldview loaded"; }
-    @Subscribe public void onWorldViewUnloaded(WorldViewUnloaded e) { sources.removeWorldView(e.getWorldView()); reset(); dirty = true; lastRebuild = "worldview unloaded"; }
+    {
+        if (e.getGameState() != GameState.LOGGED_IN) { reset(); sources.clear(); dirty = true; failed = false; }
+        else if (loggingIn) { ticksSinceLogin = 0; loggingIn = false; }
+        if (e.getGameState() == GameState.LOGGING_IN) { loggingIn = true; }
+        else if (e.getGameState() == GameState.LOGIN_SCREEN) { loggingIn = false; }
+    }
+    /**
+     * A boat (a world view inside the scene) is scanned on its own when it loads, and forgotten when it unloads:
+     * sailing loads and unloads them all the time, and a full reset turned every mark 2D for a few frames each time.
+     */
+    @Subscribe public void onWorldViewLoaded(WorldViewLoaded e)
+    {
+        WorldView wv = e.getWorldView();
+        if (wv != null && wv != client.getTopLevelWorldView() && !dirty) { sources.addWorldView(wv); sailing.scan(wv); return; }
+        dirty = true; lastRebuild = "worldview loaded";
+    }
+
+    @Subscribe public void onWorldViewUnloaded(WorldViewUnloaded e)
+    {
+        WorldView wv = e.getWorldView();
+        sources.removeWorldView(wv);
+        if (wv != null && wv != client.getTopLevelWorldView()) { return; }
+        reset(); dirty = true; lastRebuild = "worldview unloaded";
+    }
     @Subscribe public void onProfileChanged(ProfileChanged e)
-    { clientThread.invoke(() -> { if (running) { reset(); dirty = true; failed = false; } }); }
+    {
+        clientThread.invoke(() -> {
+            if (running)
+            {
+                tilePacks.clear();
+                objectMarkers.clearPoints();
+                reset(); dirty = true; failed = false;
+            }
+        });
+    }
     /** Whether 117 HD runs; checked on plugin changes, not every frame. */
     private Boolean hd;
 
@@ -477,7 +788,16 @@ public class HdTileMarkersPlugin extends Plugin
         return hd;
     }
 
-    @Subscribe public void onPluginChanged(PluginChanged e) { hd = null;  dirty = true; failed = false; lastRebuild = "plugin " + e.getPlugin().getName(); }
+    @Subscribe public void onPluginChanged(PluginChanged e)
+    {
+        hd = null;
+        HeldOverlays.pluginsChanged();
+        dirty = true;
+        failed = false;
+        lastRebuild = "plugin " + e.getPlugin().getName();
+        // Quest Helper turned on: its highlight styles are checked again for the notice.
+        if (e.isLoaded() && e.getPlugin().getClass().getName().equals(QUEST_HELPER)) { warnedQuestHelper = false; }
+    }
     /** The render trace only runs while debug info is shown: it is called for every object the client draws. */
     private boolean traced;
 
@@ -508,6 +828,48 @@ public class HdTileMarkersPlugin extends Plugin
             .build());
     }
 
+    /** The Quest Helper notice is shown once after the plugin starts (or is installed), while logged in. */
+    private boolean warnedQuestHelper;
+    private static final String QUEST_HELPER = "com.questhelper.QuestHelperPlugin", QUEST_HELPER_GROUP = "questhelper";
+
+    /**
+     * Quest Helper's default outline style is drawn by RuneLite's outline renderer, past any overlay's graphics, so HD
+     * Tile Markers cannot draw it sharp; its convex hull and click box styles it can. HD Tile Markers never changes
+     * another plugin's settings: it only tells the player, once, in the chat box (local only), how to turn this off.
+     */
+    private void warnQuestHelperOutlines()
+    {
+        if (warnedQuestHelper || config.ignoreQuestHelperWarning() || !sceneActive()) { return; }
+        // Checked once; turning Quest Helper on or changing its styles checks again (onPluginChanged, onConfigChanged).
+        warnedQuestHelper = true;
+        boolean running = false;
+        for (Plugin p : plugins.getPlugins())
+        {
+            if (p.getClass().getName().equals(QUEST_HELPER)) { running = plugins.isPluginActive(p); break; }
+        }
+        if (!running) { return; }
+        List<String> outlined = new ArrayList<>();
+        // Unset means its default, OUTLINE.
+        String[][] styles = {{"highlightStyleNpcs", "NPCs"}, {"highlightStyleObjects", "objects"}, {"highlightStyleGroundItems", "ground items"}};
+        for (String[] style : styles)
+        {
+            String value = configManager.getConfiguration(QUEST_HELPER_GROUP, style[0]);
+            if (value == null || "OUTLINE".equals(value)) { outlined.add(style[1]); }
+        }
+        if (outlined.isEmpty()) { return; }
+        chatMessages.queue(net.runelite.client.chat.QueuedMessage.builder()
+            .type(ChatMessageType.CONSOLE)
+            .runeLiteFormattedMessage(new net.runelite.client.chat.ChatMessageBuilder()
+                .append(net.runelite.client.chat.ChatColorType.HIGHLIGHT)
+                .append("HD Tile Markers: ")
+                .append(net.runelite.client.chat.ChatColorType.NORMAL)
+                .append("Quest Helper highlights " + String.join(", ", outlined) + " as outlines, which cannot be drawn sharp."
+                    + " Set its highlight style to \"Convex hull\" (NPCs) or \"Click box\" (objects, ground items) for sharp highlights."
+                    + " Turn this notice off with \"Ignore Quest Helper notice\" in HD Tile Markers' settings.")
+                .build())
+            .build());
+    }
+
     private void tracing(boolean on)
     {
         if (on == traced) { return; }
@@ -519,13 +881,19 @@ public class HdTileMarkersPlugin extends Plugin
     {
         if (e.getGroup().equals(HdTileMarkersConfig.GROUP) && "debug".equals(e.getKey())) { tracing(running && config.debug()); return; }
         if ("hd".equals(e.getGroup()) && "enableShadowTransparency".equals(e.getKey())) { warnedShadowTransparency = false; return; }
-        // Marks and settings of the plugins HD Tile Markers reads: rebuild when they change.
+        if (QUEST_HELPER_GROUP.equals(e.getGroup()) && e.getKey().startsWith("highlightStyle")) { warnedQuestHelper = false; return; }
         String group = e.getGroup();
-        if (group.equals(HdTileMarkersConfig.GROUP) || group.equals("groundMarker")
-            || group.equals(TilePackSource.DATA_GROUP) || group.equals(TilePackSource.SETTINGS_GROUP)
+        // HD Tile Markers' own settings are read every tick or frame: no rebuild (dragging a colour picker sent one
+        // per step), only another try after a failure.
+        if (group.equals(HdTileMarkersConfig.GROUP)) { failed = false; return; }
+        // Marks and settings of the plugins HD Tile Markers reads: rebuild when they change.
+        if (group.equals(TilePackSource.DATA_GROUP) || group.equals(TilePackSource.SETTINGS_GROUP)) { tilePacks.clear(); }
+        if (group.equals(ObjectMarkerSource.GROUP)) { objectMarkers.clearPoints(); }
+        if (group.equals("groundMarker") || group.equals(TilePackSource.DATA_GROUP) || group.equals(TilePackSource.SETTINGS_GROUP)
             || group.equals(ObjectMarkerSource.GROUP) || group.equals(net.runelite.client.plugins.npchighlight.NpcIndicatorsConfig.GROUP))
         { dirty = true; failed = false; lastRebuild = group + "." + e.getKey(); }
     }
+    @Subscribe public void onGameTick(GameTick e) { if (ticksSinceLogin < Integer.MAX_VALUE) { ticksSinceLogin++; } }
     @Subscribe public void onHitsplatApplied(HitsplatApplied e) { sources.hitsplat(e.getActor(), System.currentTimeMillis()); }
     @Subscribe public void onNpcSpawned(NpcSpawned e) { sources.add(e.getNpc()); }
     @Subscribe public void onNpcChanged(NpcChanged e) { sources.add(e.getNpc()); }
@@ -555,6 +923,25 @@ public class HdTileMarkersPlugin extends Plugin
     boolean replacedGround() { return originalGround != null; }
     /** Whether HD Tile Markers draws Better NPC Highlight (its overlay is held back). */
     boolean drawsBetterNpc() { return heldBetterNpc != null && heldBetterNpc.drawing(); }
+    /** Shortest Path's path overlays held back while HD Tile Markers draws their tiles; their text is still drawn in 2D. */
+    ShortestPathSource shortestPath() { return shortestPath; }
+
+    /** Runs the held core plugin overlays once (IndicatorOverlay): tile highlights go to the scene, the rest is drawn on g. */
+    void renderCaptured(java.awt.Graphics2D g)
+    {
+        if (heldPyramidPlunder != null && heldPyramidPlunder.drawing()) { pyramidPlunderCapture.render(heldPyramidPlunder.held(), g); }
+        if (heldRoguesDen != null && heldRoguesDen.drawing()) { roguesDenCapture.render(heldRoguesDen.held(), g); }
+        if (heldStarInfo != null && heldStarInfo.drawing()) { starInfoCapture.render(heldStarInfo.held(), g); }
+        for (int i = 0; i < captures.size(); i++)
+        {
+            HeldOverlays held = heldCaptured.get(i);
+            if (!held.drawing()) { continue; }
+            long start = System.nanoTime();
+            captures.get(i).render(held.held(), g);
+            time(CAPTURED[i][0].substring(CAPTURED[i][0].lastIndexOf('.') + 1).replace("Plugin", "") + " overlay", System.nanoTime() - start);
+        }
+    }
+    List<Overlay> shortestPathOverlays() { return heldShortestPath == null || !heldShortestPath.drawing() ? Collections.emptyList() : heldShortestPath.held(); }
     com.hdtilemarkers.betternpc.BetterNpcView betterNpcView() { return betterNpcView; }
     List<ObjectMarkerSource.Resolved> objectOutlines() { return sources.objectOutlines(); }
     List<NPC> npcOutlines() { return sources.npcOutlines(); }
@@ -589,7 +976,8 @@ public class HdTileMarkersPlugin extends Plugin
     /** Markers per source, as collected, with how many are in the scene: tells an empty source from a drawing problem. */
     private String sourceCounts()
     {
-        String[][] kinds = {{"ground", "ground:"}, {"packs", "tilepack:"}, {"path", "path:"}, {"npc", "npc:"}, {"bnh", "bnh:"}, {"obj", "object:"}};
+        String[][] kinds = {{"ground", "ground:"}, {"packs", "tilepack:"}, {"path", "path:"}, {"npc", "npc:"}, {"bnh", "bnh:"}, {"obj", "object:"}, {"shortest path", "shortestpath:"},
+            {"quest helper", "questhelper:"}, {"mahogany", "mahoganyhomes:"}};
         StringBuilder out = new StringBuilder();
         for (String[] kind : kinds)
         {
@@ -617,7 +1005,13 @@ public class HdTileMarkersPlugin extends Plugin
         if (!client.isGpu()) { return "HD Tile Markers: 2D fallback - GPU/117 HD inactive"; }
         if (!sceneReady) { return "HD Tile Markers: 2D fallback - scene model unavailable"; }
         String limit = markers.size() > MAX_TILES ? " (tiles in 2D: over " + MAX_TILES + ")" : "";
-        return "HD Tile Markers: " + trace.summary() + " | " + sceneShapes + " shapes" + limit + " | " + sourceCounts() + sourcesOff()
+        StringBuilder identified = new StringBuilder();
+        for (int i = 0; i < captures.size(); i++)
+        {
+            String status = heldCaptured.get(i).drawing() ? captures.get(i).identifierStatus() : null;
+            if (status != null) { identified.append(" | id ").append(CAPTURED[i][0].substring(CAPTURED[i][0].lastIndexOf('.') + 1)).append(' ').append(status); }
+        }
+        return "HD Tile Markers: " + trace.summary() + " | " + sceneShapes + " shapes" + limit + " | " + sourceCounts() + sourcesOff() + identified
             + " | rebuilds " + rebuilds + (lastRebuild.isEmpty() ? "" : " (" + lastRebuild + ")") + ", new models " + renderer.carriersCreated();
     }
 }

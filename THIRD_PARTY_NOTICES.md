@@ -29,7 +29,9 @@ HD Tile Markers does not copy RuneLite source files as a whole. It reads Ground 
 - `ObjectMarkerSource.java`: matching and display rules of Object Markers (`ObjectIndicatorsPlugin.checkObjectPoints`, `loadPoints`, `ObjectIndicatorsOverlay.render`). Read-only, no menus, marks returned to HD Tile Markers' renderer.
 - `MarkerSources.java`: Ground Markers' point loading (`GroundMarkerPlugin.loadPoints`) and NPC Indicators' selection (`getHighlights`, `highlightMatchesNPCName`, `render`, per-NPC `highlightcolor_` and `tagstyle_` keys).
 - `AggroAreaSource.java`: the display rules of NPC Aggression Timer's area lines (`NpcAggroAreaOverlay.render`, `renderPath`: colour by timer, hide out of combat, 20-tile range). The lines themselves are read through the plugin's public getters.
+- `BlastFurnaceSource.java`, `AbyssSource.java` and `PyramidPlunderSource.java`: the display rules of Blast Furnace (`BlastFurnaceClickBoxOverlay`, colours by bar state), Runecraft (`AbyssOverlay`, and the rift list of `AbyssRifts`) and Pyramid Plunder (`PyramidPlunderOverlay`, and the object IDs of `PyramidPlunderPlugin`). Blast Furnace's objects and the rifts are tracked from spawn events as those plugins do; Pyramid Plunder's are read through its public getters.
 - `AgilitySource.java` and `AgilityObstacles.java`: the Agility plugin's display rules (`AgilityOverlay.render`, `highlightTile`), its shortcut matching (`AgilityPlugin.onTileObject`) and its obstacle ID lists (`Obstacles`, copied unchanged). Obstacles, marks of grace and Sepulchre NPCs are read through the plugin's public getters.
+- `FloatClickbox.java`: RuneLite's clickbox (`Perspective.getClickbox`, `calculateAABB`, `calculate2DBounds`), its rectangle union (`RectangleUnion.union`) and convex clipping (`SimplePolygon.intersectWithConvex`), ported from ints to floats; segments are looked up through a sorted index instead of a list walk.
 - `Terrain.java`: the height interpolation of `Perspective.getTileHeight`.
 - `ModelShapes.java`: the projection math of `Perspective.localToCanvasGpu` / `modelToCanvas`.
 - `HdTileMarkersConfig.java`: the option names and descriptions of Tile Indicators (`TileIndicatorsConfig`); defaults use the original HD Tile Markers development preset.
@@ -84,3 +86,19 @@ HD Tile Markers contains no code from this plugin. The Tile Indicators options "
 - License: BSD 2-Clause, copyright (c) 2023 rdutta. Full text in `src/main/resources/META-INF/LICENSE-the-gauntlet`, included in the JAR.
 
 `GauntletSource.java` adapts the resource and utility object IDs (`MazeModule`, `ResourceGameObject`, `Resource`), the chat message resource tracking (`ResourceManager`) and the display rules and icons of `MazeOverlay`. Read-only: HD Tile Markers reads its settings, never writes them. Its NPC highlights, infobox counters, minimap and timer stay with that plugin.
+
+## Rogues' Den
+
+- Author: Jordan (nightfirecat)
+- Source: https://github.com/nightfirecat/plugin-hub-plugins
+- Commit: `3ece9e0401f5ebac9da2762015449d5e68bb0bfc`
+- License: BSD 2-Clause, copyright (c) 2021 Jordan. Full text in `src/main/resources/META-INF/LICENSE-rogues-den`, included in the JAR.
+- `RoguesDenSource.java`: the obstacle objects per tile (`Obstacles`), the jewel check and object tracking (`RoguesDenPlugin`) and the clickbox colours (`RoguesDenOverlay`). HD Tile Markers does not reference its classes; its hint tiles and text still come from its own overlay.
+
+## Star Info
+
+- Author: Cute Rock (pwatts6060)
+- Source: https://github.com/pwatts6060/runelite-plugins
+- Commit: `38fc77770ad0a5c07e74e7491975a90e40e62173`
+- License: BSD 2-Clause, copyright (c) 2022 Cute Rock. Full text in `src/main/resources/META-INF/LICENSE-star-info`, included in the JAR.
+- `StarInfoSource.java`: the crashed star tier IDs (`Star.TIER_IDS`) and the hull colour by Mining level (`StarInfoOverlay.getStarColor`). HD Tile Markers does not reference its classes; its text and health bar still come from its own overlay.

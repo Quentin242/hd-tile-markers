@@ -22,7 +22,10 @@ final class Silhouette
 
     static final class Scratch
     {
-        boolean[] grid = new boolean[0];
+        /** The raster, one bit per cell, rows of (w + 63) / 64 words. */
+        long[] bits = new long[0];
+        /** Per lattice corner, the corners its boundary edges lead to (-1: none); all -1 between traces. */
+        int[] out0 = new int[0], out1 = new int[0];
         final float[] intersections = new float[3];
     }
 
@@ -41,9 +44,8 @@ final class Silhouette
         {
             if (hidden != null && hidden[f]) { continue; }
             int i = a[f], j = b[f], k = c[f];
-            if (!Float.isFinite(x[i]) || !Float.isFinite(y[i]) || !Float.isFinite(x[j])
-                || !Float.isFinite(y[j]) || !Float.isFinite(x[k]) || !Float.isFinite(y[k]))
-            { return Collections.emptyList(); }
+            // Faces with a vertex that was not projected (at or behind the camera) are left out, as RuneLite does.
+            if (unprojected(x, y, i, j, k)) { continue; }
             minX = Math.min(minX, Math.min(x[i], Math.min(x[j], x[k])));
             maxX = Math.max(maxX, Math.max(x[i], Math.max(x[j], x[k])));
             minY = Math.min(minY, Math.min(y[i], Math.min(y[j], y[k])));
@@ -68,23 +70,25 @@ final class Silhouette
         {
             if (hidden != null && hidden[f]) { continue; }
             int i = a[f], j = b[f], k = c[f];
+            if (unprojected(x, y, i, j, k)) { continue; }
             double fw = (double) Math.max(x[i], Math.max(x[j], x[k])) - Math.min(x[i], Math.min(x[j], x[k]));
             double fh = (double) Math.max(y[i], Math.max(y[j], y[k])) - Math.min(y[i], Math.min(y[j], y[k]));
             work += paddedCells(fw, fh, scale);
             if (work > MAX_RASTER_WORK) { return Collections.emptyList(); }
         }
-        int cells = Math.multiplyExact(w, h);
-        if (scratch.grid.length < cells) { scratch.grid = new boolean[cells]; }
-        else { Arrays.fill(scratch.grid, 0, cells, false); }
-        boolean[] grid = scratch.grid;
+        // The raster as bits, 64 cells a word: filling, and finding the edges, work a word at a time.
+        int words = (w + 63) >>> 6, total = Math.multiplyExact(words, h);
+        if (scratch.bits.length < total) { scratch.bits = new long[total]; }
+        else { Arrays.fill(scratch.bits, 0, total, 0); }
+        long[] grid = scratch.bits;
         for (int f = 0; f < faces; f++)
         {
-            if (hidden != null && hidden[f]) { continue; }
-            fill(grid, w, h, (x[a[f]] - ox) * scale, (y[a[f]] - oy) * scale, (x[b[f]] - ox) * scale, (y[b[f]] - oy) * scale,
+            if (hidden != null && hidden[f] || unprojected(x, y, a[f], b[f], c[f])) { continue; }
+            fill(grid, words, w, h, (x[a[f]] - ox) * scale, (y[a[f]] - oy) * scale, (x[b[f]] - ox) * scale, (y[b[f]] - oy) * scale,
                 (x[c[f]] - ox) * scale, (y[c[f]] - oy) * scale, scratch.intersections);
         }
         List<float[]> loops = new ArrayList<>();
-        for (int[] loop : boundaries(grid, w, h))
+        for (int[] loop : boundaries(grid, words, w, h, scratch))
         {
             float[] simple = simplify(loop, 1.0);
             if (simple.length < 6) { continue; }
@@ -94,13 +98,19 @@ final class Silhouette
         return loops;
     }
 
+    private static boolean unprojected(float[] x, float[] y, int i, int j, int k)
+    {
+        return !Float.isFinite(x[i]) || !Float.isFinite(y[i]) || !Float.isFinite(x[j])
+            || !Float.isFinite(y[j]) || !Float.isFinite(x[k]) || !Float.isFinite(y[k]);
+    }
+
     private static double paddedCells(double width, double height, float scale)
     {
         return (Math.ceil(width * scale) + 2) * (Math.ceil(height * scale) + 2);
     }
 
     /** Marks cells whose centres lie inside the triangle (grid coordinates). */
-    private static void fill(boolean[] grid, int w, int h, float x0, float y0, float x1, float y1, float x2, float y2, float[] xs)
+    private static void fill(long[] grid, int words, int w, int h, float x0, float y0, float x1, float y1, float x2, float y2, float[] xs)
     {
         int top = Math.max(0, (int) Math.floor(Math.min(y0, Math.min(y1, y2)) - 0.5f));
         int bottom = Math.min(h - 1, (int) Math.ceil(Math.max(y0, Math.max(y1, y2)) - 0.5f));
@@ -115,7 +125,7 @@ final class Silhouette
             float left = Math.min(xs[0], xs[1]), right = Math.max(xs[0], xs[1]);
             if (k == 3) { left = Math.min(left, xs[2]); right = Math.max(right, xs[2]); }
             int from = Math.max(0, (int) Math.ceil(left - 0.5f)), to = Math.min(w - 1, (int) Math.floor(right - 0.5f));
-            for (int col = from; col <= to; col++) { grid[row * w + col] = true; }
+            if (from <= to) { setRange(grid, row * words, from, to); }
         }
     }
 
@@ -128,62 +138,101 @@ final class Silhouette
         return k;
     }
 
-    /**
-     * Loops along cell edges between covered and empty cells, as lattice corner
-     * coordinates {x0, y0, x1, y1, ...}. Each directed edge keeps the covered
-     * cell on the same side, so edges chain into closed loops.
-     */
-    private static List<int[]> boundaries(boolean[] grid, int w, int h)
+    /** Sets the bits of columns from..to (inclusive) in the row starting at word base. */
+    private static void setRange(long[] grid, int base, int from, int to)
     {
-        // Directed edges keyed by their start corner; a corner can start two edges at a diagonal touch.
-        Map<Long, List<long[]>> starts = new HashMap<>();
+        int fw = from >>> 6, tw = to >>> 6;
+        long fm = -1L << (from & 63), tm = -1L >>> (63 - (to & 63));
+        if (fw == tw) { grid[base + fw] |= fm & tm; return; }
+        grid[base + fw] |= fm;
+        for (int i = fw + 1; i < tw; i++) { grid[base + i] = -1L; }
+        grid[base + tw] |= tm;
+    }
+
+    /** Word i of a row shifted so each column holds its left (col - 1) neighbour; nothing enters at column 0. */
+    private static long left(long[] g, int base, int i) { return g[base + i] << 1 | (i > 0 ? g[base + i - 1] >>> 63 : 0); }
+
+    /** Word i of a row shifted so each column holds its right (col + 1) neighbour; the row's end brings nothing. */
+    private static long right(long[] g, int base, int i, int words) { return g[base + i] >>> 1 | (i < words - 1 ? g[base + i + 1] << 63 : 0); }
+
+    /**
+     * Loops along cell edges between covered and empty cells, as lattice corner coordinates {x0, y0, x1, y1, ...}.
+     * Each directed edge keeps the covered cell on the same side, so edges chain into closed loops. Only words with an
+     * edge are visited; edges are kept per start corner in two flat arrays (a corner starts two at a diagonal touch),
+     * without allocating per edge.
+     */
+    private static List<int[]> boundaries(long[] grid, int words, int w, int h, Scratch scratch)
+    {
+        int cw = w + 1, corners = cw * (h + 1);
+        if (scratch.out0.length < corners)
+        {
+            scratch.out0 = new int[corners];
+            scratch.out1 = new int[corners];
+            Arrays.fill(scratch.out0, -1);
+            Arrays.fill(scratch.out1, -1);
+        }
+        int[] out0 = scratch.out0, out1 = scratch.out1;
         int edges = 0;
         for (int row = 0; row < h; row++)
         {
-            for (int col = 0; col < w; col++)
+            int base = row * words;
+            for (int i = 0; i < words; i++)
             {
-                if (!grid[row * w + col]) { continue; }
-                if (row == 0 || !grid[(row - 1) * w + col]) { edges += add(starts, col, row, col + 1, row); }
-                if (col == w - 1 || !grid[row * w + col + 1]) { edges += add(starts, col + 1, row, col + 1, row + 1); }
-                if (row == h - 1 || !grid[(row + 1) * w + col]) { edges += add(starts, col + 1, row + 1, col, row + 1); }
-                if (col == 0 || !grid[row * w + col - 1]) { edges += add(starts, col, row + 1, col, row); }
+                long cur = grid[base + i];
+                if (cur == 0) { continue; }
+                long up = row > 0 ? grid[base - words + i] : 0, down = row < h - 1 ? grid[base + words + i] : 0;
+                long top = cur & ~up, bottom = cur & ~down, west = cur & ~left(grid, base, i), east = cur & ~right(grid, base, i, words);
+                for (long any = top | bottom | west | east; any != 0; any &= any - 1)
+                {
+                    int bit = Long.numberOfTrailingZeros(any);
+                    long m = 1L << bit;
+                    int c = row * cw + (i << 6) + bit;
+                    // Per cell in the same order as before: top, right, bottom, left.
+                    if ((top & m) != 0) { edges += add(out0, out1, c, c + 1); }
+                    if ((east & m) != 0) { edges += add(out0, out1, c + 1, c + 1 + cw); }
+                    if ((bottom & m) != 0) { edges += add(out0, out1, c + 1 + cw, c + cw); }
+                    if ((west & m) != 0) { edges += add(out0, out1, c + cw, c); }
+                }
             }
         }
         List<int[]> loops = new ArrayList<>();
+        int scan = 0;
         while (edges > 0)
         {
-            Map.Entry<Long, List<long[]>> first = starts.entrySet().iterator().next();
-            long[] edge = first.getValue().remove(first.getValue().size() - 1);
-            if (first.getValue().isEmpty()) { starts.remove(first.getKey()); }
-            edges--;
+            while (out0[scan] < 0 && out1[scan] < 0) { scan++; }
+            int start = scan, from = start;
             int[] loop = new int[16];
             int size = 0;
-            long start = key((int) edge[0], (int) edge[1]);
             while (true)
             {
-                if (size + 2 > loop.length) { loop = Arrays.copyOf(loop, loop.length * 2); }
-                loop[size++] = (int) edge[0];
-                loop[size++] = (int) edge[1];
-                long next = key((int) edge[2], (int) edge[3]);
-                if (next == start) { break; }
-                List<long[]> out = starts.get(next);
-                if (out == null) { break; }
-                edge = out.remove(out.size() - 1);
-                if (out.isEmpty()) { starts.remove(next); }
+                int to = take(out0, out1, from);
                 edges--;
+                if (size + 2 > loop.length) { loop = Arrays.copyOf(loop, loop.length * 2); }
+                loop[size++] = from % cw;
+                loop[size++] = from / cw;
+                if (to == start || out0[to] < 0 && out1[to] < 0) { break; }
+                from = to;
             }
             if (size >= 6) { loops.add(Arrays.copyOf(loop, size)); }
         }
         return loops;
     }
 
-    private static int add(Map<Long, List<long[]>> starts, int x0, int y0, int x1, int y1)
+    private static int add(int[] out0, int[] out1, int from, int to)
     {
-        starts.computeIfAbsent(key(x0, y0), k -> new ArrayList<>(2)).add(new long[]{x0, y0, x1, y1});
+        if (out0[from] < 0) { out0[from] = to; }
+        else { out1[from] = to; }
         return 1;
     }
 
-    private static long key(int x, int y) { return ((long) x << 32) | (y & 0xffffffffL); }
+    /** An edge from this corner, the one added last first. */
+    private static int take(int[] out0, int[] out1, int from)
+    {
+        int to;
+        if (out1[from] >= 0) { to = out1[from]; out1[from] = -1; }
+        else { to = out0[from]; out0[from] = -1; }
+        return to;
+    }
 
     /** Douglas-Peucker on a closed loop, after dropping collinear points; tolerance in grid cells. */
     static float[] simplify(int[] loop, double tolerance)

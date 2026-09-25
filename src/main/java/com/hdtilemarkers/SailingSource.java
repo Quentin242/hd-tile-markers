@@ -298,7 +298,7 @@ final class SailingSource
         for (WorldView boat : top.worldViews()) { scan(boat); }
     }
 
-    private void scan(WorldView wv)
+    void scan(WorldView wv)
     {
         for (NPC npc : wv.npcs()) { add(npc); }
         for (Tile[][] plane : wv.getScene().getTiles())

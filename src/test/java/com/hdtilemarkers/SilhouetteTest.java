@@ -45,11 +45,11 @@ public class SilhouetteTest
         Silhouette.Scratch scratch = new Silhouette.Scratch();
         int[] a = {0}, b = {1}, c = {2};
         Silhouette.trace(new float[]{0, 100, 0}, new float[]{0, 0, 100}, a, b, c, 1, null, scratch);
-        boolean[] buffer = scratch.grid;
+        long[] buffer = scratch.bits;
         float[] x = {20, 30, 20}, y = {40, 40, 50};
         List<float[]> expected = Silhouette.trace(x, y, a, b, c, 1, null);
         List<float[]> actual = Silhouette.trace(x, y, a, b, c, 1, null, scratch);
-        assertSame(buffer, scratch.grid);
+        assertSame(buffer, scratch.bits);
         assertEquals(expected.size(), actual.size());
         for (int i = 0; i < expected.size(); i++) { assertArrayEquals(expected.get(i), actual.get(i), 0); }
     }
@@ -62,7 +62,7 @@ public class SilhouetteTest
             Silhouette.Scratch scratch = new Silhouette.Scratch();
             assertTrue(Silhouette.trace(new float[]{0, dimensions[0], 0}, new float[]{0, 0, dimensions[1]},
                 new int[]{0}, new int[]{1}, new int[]{2}, 1, null, scratch).isEmpty());
-            assertEquals(0, scratch.grid.length);
+            assertEquals(0, scratch.bits.length);
         }
     }
 
@@ -71,7 +71,7 @@ public class SilhouetteTest
         Silhouette.Scratch scratch = new Silhouette.Scratch();
         assertFalse(Silhouette.trace(new float[]{0, 512, 0}, new float[]{0, 0, 512},
             new int[]{0}, new int[]{1}, new int[]{2}, 1, null, scratch).isEmpty());
-        assertTrue(scratch.grid.length <= Silhouette.MAX_CELLS);
+        assertTrue(scratch.bits.length <= Silhouette.MAX_CELLS);
     }
 
     @Test public void repeatedOverlappingFacesHaveABoundedRasterBudget()
@@ -82,7 +82,7 @@ public class SilhouetteTest
         Silhouette.Scratch scratch = new Silhouette.Scratch();
         assertTrue(Silhouette.trace(new float[]{0, 500, 0}, new float[]{0, 0, 500},
             a, b, c, 100, null, scratch).isEmpty());
-        assertEquals(0, scratch.grid.length);
+        assertEquals(0, scratch.bits.length);
     }
 
     private static double area(float[] p)
