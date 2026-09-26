@@ -87,7 +87,7 @@ public class BetterNpcView
 	private ColorManager colorManager;
 
 	@Inject
-	private NameAndIdContainer nameAndIdContainer;
+	private NameListContainer nameListContainer;
 
 	@Inject
 	private RespawnManager respawnManager;
@@ -105,7 +105,7 @@ public class BetterNpcView
 	/** The selection of the original render loop, reporting each style instead of drawing it. */
 	public void visit(Visitor visitor)
 	{
-		for (NPCInfo npcInfo : nameAndIdContainer.getNpcList())
+		for (NPCInfo npcInfo : nameListContainer.getNpcList())
 		{
 			NPC npc = npcInfo.getNpc();
 			NPCComposition npcComposition = npc.getTransformedComposition();
@@ -233,7 +233,7 @@ public class BetterNpcView
 	/** As renderExtras; tileInScene tells which respawn tiles HD Tile Markers draws in the scene, so only their text is drawn here. */
 	public void renderExtras(Graphics2D graphics, java.util.function.IntPredicate tileInScene)
 	{
-		for (NPCInfo npcInfo : nameAndIdContainer.getNpcList())
+		for (NPCInfo npcInfo : nameListContainer.getNpcList())
 		{
 			NPC npc = npcInfo.getNpc();
 			NPCComposition npcComposition = npc.getTransformedComposition();
@@ -243,9 +243,9 @@ public class BetterNpcView
 				boolean showNPC = (npcComposition.isFollower() && config.highlightPets()) || (!npcComposition.isFollower() && showWhileDead);
 				if (showNPC && withinDistanceLimit(npc))
 				{
-					if (nameAndIdContainer.getNamesToDisplay().size() > 0 && npc.getName() != null)
+					if (nameListContainer.getNamesToDisplay().size() > 0 && npc.getName() != null)
 					{
-						for (String str : nameAndIdContainer.getNamesToDisplay())
+						for (String str : nameListContainer.getNamesToDisplay())
 						{
 							if (WildcardMatcher.matches(str, npc.getName().toLowerCase()))
 							{

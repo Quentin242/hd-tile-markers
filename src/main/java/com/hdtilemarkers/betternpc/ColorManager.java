@@ -29,7 +29,7 @@ public class ColorManager {
 	}
 
 	@Inject
-	private NameAndIdContainer nameAndIdContainer;
+	private NameListContainer nameListContainer;
 
 	/**
 	 * Color of the NPC in the list Used for Minimap dot and displayed names

@@ -34,7 +34,7 @@ public class BetterNpcEvents
 	private ConfigTransformManager configTransformManager;
 
 	@Inject
-	private NameAndIdContainer nameAndIdContainer;
+	private NameListContainer nameListContainer;
 
 	@Inject
 	private RespawnManager respawnManager;
@@ -57,9 +57,9 @@ public class BetterNpcEvents
 
 	private void reset()
 	{
-		nameAndIdContainer.getNpcList().clear();
-		nameAndIdContainer.setCurrentTask("");
-		nameAndIdContainer.clearAll();
+		nameListContainer.getNpcList().clear();
+		nameListContainer.setCurrentTask("");
+		nameListContainer.clearAll();
 		respawnManager.reset();
 	}
 
@@ -77,7 +77,7 @@ public class BetterNpcEvents
 	{
 		if (event.getGameState() == GameState.LOGIN_SCREEN || event.getGameState() == GameState.HOPPING)
 		{
-			nameAndIdContainer.getNpcList().clear();
+			nameListContainer.getNpcList().clear();
 			respawnManager.onGameStateChanged();
 		}
 	}
@@ -89,7 +89,7 @@ public class BetterNpcEvents
 		NPCInfo npcInfo = configTransformManager.createNpcInfo(npc);
 		if (npcInfo != null)
 		{
-			nameAndIdContainer.getNpcList().add(npcInfo);
+			nameListContainer.getNpcList().add(npcInfo);
 			if (!client.getTopLevelWorldView().isInstance())
 			{
 				respawnManager.onNpcSpawned(npc);
@@ -102,7 +102,7 @@ public class BetterNpcEvents
 	{
 		NPC npc = event.getNpc();
 		respawnManager.onNpcDespawned(npc);
-		nameAndIdContainer.getNpcList().removeIf(n -> n.getNpc().getIndex() == npc.getIndex());
+		nameListContainer.getNpcList().removeIf(n -> n.getNpc().getIndex() == npc.getIndex());
 	}
 
 	@Subscribe
@@ -115,18 +115,18 @@ public class BetterNpcEvents
 	public void onNpcChanged(NpcChanged event)
 	{
 		NPC npc = event.getNpc();
-		nameAndIdContainer.getNpcList().removeIf(n -> n.getNpc().getIndex() == npc.getIndex());
+		nameListContainer.getNpcList().removeIf(n -> n.getNpc().getIndex() == npc.getIndex());
 		NPCInfo npcInfo = configTransformManager.createNpcInfo(npc);
 		if (npcInfo != null)
 		{
-			nameAndIdContainer.getNpcList().add(npcInfo);
+			nameListContainer.getNpcList().add(npcInfo);
 		}
 	}
 
 	@Subscribe(priority = -1)
 	public void onGameTick(GameTick event)
 	{
-		if (slayerPluginIntegration.checkSlayerPluginEnabled() && !nameAndIdContainer.getCurrentTask().equals(slayerPluginService.getTask()))
+		if (slayerPluginIntegration.checkSlayerPluginEnabled() && !nameListContainer.getCurrentTask().equals(slayerPluginService.getTask()))
 		{
 			configTransformManager.recreateNPCInfoList();
 		}

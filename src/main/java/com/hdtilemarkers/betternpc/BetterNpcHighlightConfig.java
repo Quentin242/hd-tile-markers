@@ -2,7 +2,7 @@
  * Adapted from Better NPC Highlight, https://github.com/riktenx/better-npc-highlight,
  * commit bf59bfb9a616897e9ffcd14d0d2b543e4c119b09. BSD 2-Clause License, see
  * META-INF/LICENSE-better-npc-highlight and THIRD_PARTY_NOTICES.md. Changes for HD
- * Tile Markers: package only. HD Tile Markers reads Better NPC Highlight's saved settings through this interface; it never writes them.
+ * Tile Markers: package; its NPC ID lists left out (HD Tile Markers matches names only). HD Tile Markers reads Better NPC Highlight's saved settings through this interface; it never writes them.
  */
 /*
  * Copyright (c) 2022, Buchus <http://github.com/MoreBuchus>
@@ -79,13 +79,6 @@ public interface BetterNpcHighlightConfig extends Config {
 		return "";
 	}
 
-
-	@ConfigItem(position = 3, keyName = "tileIds", name = "Tile IDs", description = "List of NPCs to highlight by tile", section = tileSection)
-	default String tileIds() {
-		return "";
-	}
-
-
 	@Alpha
 	@ConfigItem(position = 4, keyName = "tileColor", name = "Highlight Color", description = "Sets color of NPC tile highlights", section = tileSection)
 	default Color tileColor() {
@@ -139,13 +132,6 @@ public interface BetterNpcHighlightConfig extends Config {
 	default String trueTileNames() {
 		return "";
 	}
-
-
-	@ConfigItem(position = 3, keyName = "trueTileIds", name = "True Tile IDs", description = "List of npc's to highlight true tile", section = trueTileSection)
-	default String trueTileIds() {
-		return "";
-	}
-
 
 	@Alpha
 	@ConfigItem(position = 4, keyName = "trueTileColor", name = "Highlight Color", description = "Sets color of npc highlights", section = trueTileSection)
@@ -201,13 +187,6 @@ public interface BetterNpcHighlightConfig extends Config {
 		return "";
 	}
 
-
-	@ConfigItem(position = 3, keyName = "swTileIds", name = "South West Tile IDs", description = "List of npc's to highlight south west tile", section = swTileSection)
-	default String swTileIds() {
-		return "";
-	}
-
-
 	@Alpha
 	@ConfigItem(position = 4, keyName = "swTileColor", name = "Highlight Color", description = "Sets color of npc highlights", section = swTileSection)
 	default Color swTileColor() {
@@ -261,13 +240,6 @@ public interface BetterNpcHighlightConfig extends Config {
 	default String swTrueTileNames() {
 		return "";
 	}
-
-
-	@ConfigItem(position = 3, keyName = "swTrueTileIds", name = "South West True Tile IDs", description = "List of NPCs to highlight by their south west true tile", section = swTrueTileSection)
-	default String swTrueTileIds() {
-		return "";
-	}
-
 
 	@Alpha
 	@ConfigItem(position = 4, keyName = "swTrueTileColor", name = "Highlight Color", description = "Sets color of npc highlights", section = swTrueTileSection)
@@ -323,13 +295,6 @@ public interface BetterNpcHighlightConfig extends Config {
 		return "";
 	}
 
-
-	@ConfigItem(position = 3, keyName = "hullIds", name = "Hull IDs", description = "List of npc's to highlight hull", section = hullSection)
-	default String hullIds() {
-		return "";
-	}
-
-
 	@Alpha
 	@ConfigItem(position = 4, keyName = "hullColor", name = "Highlight Color", description = "Sets color of npc highlights", section = hullSection)
 	default Color hullColor() {
@@ -379,13 +344,6 @@ public interface BetterNpcHighlightConfig extends Config {
 		return "";
 	}
 
-
-	@ConfigItem(position = 3, keyName = "areaIds", name = "Area IDs", description = "List of npc's to highlight area", section = areaSection)
-	default String areaIds() {
-		return "";
-	}
-
-
 	@Alpha
 	@ConfigItem(position = 4, keyName = "areaColor", name = "Highlight Color", description = "Sets color of npc highlights", section = areaSection)
 	default Color areaColor() {
@@ -417,13 +375,6 @@ public interface BetterNpcHighlightConfig extends Config {
 	default String outlineNames() {
 		return "";
 	}
-
-
-	@ConfigItem(position = 3, keyName = "outlineIds", name = "Outline IDs", description = "List of npc's to highlight outline", section = outlineSection)
-	default String outlineIds() {
-		return "";
-	}
-
 
 	@Alpha
 	@ConfigItem(position = 4, keyName = "outlineColor", name = "Highlight Color", description = "Sets color of npc highlights", section = outlineSection)
@@ -468,13 +419,6 @@ public interface BetterNpcHighlightConfig extends Config {
 	default String clickboxNames() {
 		return "";
 	}
-
-
-	@ConfigItem(position = 3, keyName = "clickboxIds", name = "Clickbox IDs", description = "List of NPCs to highlight by clickbox", section = clickboxSection)
-	default String clickboxIds() {
-		return "";
-	}
-
 
 	@Alpha
 	@ConfigItem(position = 4, keyName = "clickboxColor", name = "Highlight Color", description = "Sets color of NPC clickbox highlights", section = clickboxSection)
@@ -551,11 +495,6 @@ public interface BetterNpcHighlightConfig extends Config {
 	default int slayerRaveSpeed() {
 		return 6000;
 	}
-	//endregion
-
-	//region Entity Hider
-
-
 	//endregion
 
 	//region Presets
@@ -637,11 +576,6 @@ public interface BetterNpcHighlightConfig extends Config {
 		return "";
 	}
 
-	@ConfigItem(position = 4, keyName = "ignoreDeadExclusionID", name = "Ignore Dead Exclusion ID List", description = "List of NPC IDs to not remove highlight when dead", section = miscellaneousSection)
-	default String ignoreDeadExclusionID() {
-		return "";
-	}
-
 	@ConfigItem(position = 9, keyName = "renderDistance", name = "Render Distance", description = "Limits overlays to be drawn to within the chosen distance from the local player. <br>Short = 7 tiles, Medium = 11 tiles", section = miscellaneousSection)
 	default renderDistance renderDistance() {
 		return renderDistance.NONE;
@@ -709,7 +643,6 @@ public interface BetterNpcHighlightConfig extends Config {
 			return group;
 		}
 	}
-
 
 	@Getter
 	@RequiredArgsConstructor

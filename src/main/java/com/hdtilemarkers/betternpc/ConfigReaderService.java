@@ -2,7 +2,7 @@
  * Adapted from Better NPC Highlight, https://github.com/riktenx/better-npc-highlight,
  * commit bf59bfb9a616897e9ffcd14d0d2b543e4c119b09. BSD 2-Clause License, see
  * META-INF/LICENSE-better-npc-highlight and THIRD_PARTY_NOTICES.md. Changes for HD
- * Tile Markers: package only.
+ * Tile Markers: package; list joining and the numeric (NPC ID) check removed.
  */
 package com.hdtilemarkers.betternpc;
 
@@ -37,28 +37,6 @@ public class ConfigReaderService {
 		}
 
 		return list;
-	}
-
-	/**
-	 * Joins a list of entries back into a single comma separated config value,
-	 * escaping commas and backslashes so the value can be parsed back losslessly.
-
-	/**
-	 * Returns true when the given string contains only digits.
-	 */
-	public boolean isNumeric(String str) {
-		if (str == null || str.isEmpty())
-		{
-			return false;
-		}
-		for (int i = 0; i < str.length(); i++)
-		{
-			if (!Character.isDigit(str.charAt(i)))
-			{
-				return false;
-			}
-		}
-		return true;
 	}
 
 	/**
