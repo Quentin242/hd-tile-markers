@@ -67,6 +67,47 @@ public class MarkerSourcesTest
         verify(config, never()).setConfiguration(anyString(), anyString(), any());
     }
 
+    @Test public void savedGroundTilesSurviveInstanceFloorChanges()
+    {
+        when(config.getConfiguration("groundMarker", "region_12850")).thenReturn(
+            "[{\"regionId\":12850,\"regionX\":10,\"regionY\":10,\"z\":0}]");
+        assertInstanceFloorChanges("ground:");
+    }
+
+    @Test public void tilePackTilesSurviveInstanceFloorChanges()
+    {
+        String tiles = "[{\"regionId\":12850,\"regionX\":10,\"regionY\":10,\"z\":0}]";
+        when(config.getConfiguration(TilePackSource.DATA_GROUP, "packs")).thenReturn("[10000]");
+        when(config.getConfiguration(TilePackSource.DATA_GROUP, "customPacks")).thenReturn(
+            GSON.toJson(Collections.singletonMap("10000", Collections.singletonMap("packTiles", tiles))));
+        sources.tilePacksEnabled = true;
+        assertInstanceFloorChanges("tilepack:");
+    }
+
+    private void assertInstanceFloorChanges(String prefix)
+    {
+        // One template tile appears on two instance floors. Load upstairs, then descend without a scene load.
+        int[][][] chunks = new int[4][13][13];
+        for (int[][] floor : chunks) { for (int[] row : floor) { Arrays.fill(row, -1); } }
+        chunks[2][1][1] = chunks[1][1][1] = (401 << 14) | (401 << 3);
+        when(wv.isInstance()).thenReturn(true);
+        when(wv.getInstanceTemplateChunks()).thenReturn(chunks);
+        when(wv.getPlane()).thenReturn(2);
+        sources.rebuild();
+        for (int plane : new int[]{2, 1, 0, 2, 1})
+        {
+            when(wv.getPlane()).thenReturn(plane);
+            List<Marker> markers = collect();
+            assertEquals("visible tiles on floor " + plane, plane == 0 ? 0 : 1, markers.size());
+            if (plane == 0) { continue; }
+            Marker marker = markers.get(0);
+            assertTrue(marker.key.startsWith(prefix));
+            assertEquals(plane, marker.plane);
+            assertEquals(1344, marker.point.getX());
+            assertEquals(1344, marker.point.getY());
+        }
+    }
+
     @Test public void malformedSavedDataPreventsReplacingOriginalOverlay()
     {
         when(config.getConfiguration("groundMarker", "region_12850")).thenReturn("broken");

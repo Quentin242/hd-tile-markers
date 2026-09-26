@@ -73,11 +73,19 @@ final class ModelTarget
      */
     Mesh<?> mesh()
     {
-        if (npc != null) { return npc.getModel(); }
-        if (renderable == null) { return null; }
-        if (renderable instanceof Model) { return (Model) renderable; }
-        if (renderable instanceof ModelData) { return (ModelData) renderable; }
-        return renderable.getModel();
+        try
+        {
+            if (npc != null) { return npc.getModel(); }
+            if (renderable == null) { return null; }
+            if (renderable instanceof Model) { return (Model) renderable; }
+            if (renderable instanceof ModelData) { return (ModelData) renderable; }
+            return renderable.getModel();
+        }
+        catch (NullPointerException ex)
+        {
+            // Client geometry can be temporarily unavailable while an object changes. Retry next frame.
+            return null;
+        }
     }
 
     LocalPoint location()
@@ -100,5 +108,10 @@ final class ModelTarget
         return npc != null ? Perspective.getTileHeight(client, npc.getLocalLocation(), plane()) : object.getZ();
     }
 
-    Shape shape() { return fallback.get(); }
+    Shape shape()
+    {
+        try { return fallback.get(); }
+        // The 2D clickbox/hull can read the same unavailable client model as mesh().
+        catch (NullPointerException ex) { return null; }
+    }
 }

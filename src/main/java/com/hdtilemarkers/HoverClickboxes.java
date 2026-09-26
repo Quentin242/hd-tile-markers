@@ -32,10 +32,19 @@ final class HoverClickboxes
     static boolean hovered(TileObject object, net.runelite.api.Point mouse)
     {
         if (mouse == null || mouse.getX() < 0) { return false; }
-        net.runelite.api.Point base = object.getCanvasLocation();
-        if (base == null || Math.abs(base.getX() - mouse.getX()) > HOVER_REACH || Math.abs(base.getY() - mouse.getY()) > HOVER_REACH) { return false; }
-        Shape clickbox = object.getClickbox();
-        return clickbox != null && clickbox.contains(mouse.getX(), mouse.getY());
+        try
+        {
+            net.runelite.api.Point base = object.getCanvasLocation();
+            if (base == null || Math.abs(base.getX() - mouse.getX()) > HOVER_REACH || Math.abs(base.getY() - mouse.getY()) > HOVER_REACH) { return false; }
+            Shape clickbox = object.getClickbox();
+            return clickbox != null && clickbox.contains(mouse.getX(), mouse.getY());
+        }
+        catch (NullPointerException ex)
+        {
+            // The client's dynamic object model can be unavailable during a scene transition (Sepulchre).
+            // Hover colour is optional: retry next tick instead of disabling every scene marker.
+            return false;
+        }
     }
 
     /** A convex hull mark as OverlayUtil.renderPolygon draws it: width 2, fill black at alpha 50. */

@@ -20,11 +20,12 @@ public class AgilitySourceTest
     private AgilitySource source;
     private HdTileMarkersConfig hdConfig;
     private WorldView wv;
+    private Client client;
     private final List<Tile> marks = new ArrayList<>();
 
     @Before public void setup()
     {
-        Client client = mock(Client.class);
+        client = mock(Client.class);
         plugin = mock(AgilityPlugin.class);
         config = mock(AgilityConfig.class, CALLS_REAL_METHODS);
         ConfigManager configs = mock(ConfigManager.class);
@@ -71,6 +72,25 @@ public class AgilitySourceTest
         models.clear();
         source.collect(new ArrayList<>(), models);
         assertTrue(models.isEmpty());
+    }
+
+    @Test public void unavailableClickboxDoesNotStopObstaclesAndRecoversNextTick()
+    {
+        GameObject changing = obstacle(ObjectID.CLIMBING_BRANCH);
+        GameObject other = obstacle(AgilityObstacles.OBSTACLE_IDS.iterator().next());
+        obstacles(changing, other);
+        when(client.getMouseCanvasPosition()).thenReturn(new Point(100, 100));
+        when(changing.getCanvasLocation()).thenReturn(new Point(100, 100));
+        when(changing.getClickbox()).thenThrow(new NullPointerException("client model unavailable"))
+            .thenReturn(new java.awt.Rectangle(90, 90, 20, 20));
+        List<ModelTarget> models = new ArrayList<>();
+        source.collect(new ArrayList<>(), models);
+        assertEquals(2, models.size());
+        assertEquals(config.getOverlayColor(), models.stream().filter(t -> t.object == changing).findFirst().get().color);
+        models.clear();
+        source.collect(new ArrayList<>(), models);
+        assertEquals(2, models.size());
+        assertEquals(config.getOverlayColor().darker(), models.stream().filter(t -> t.object == changing).findFirst().get().color);
     }
 
     @Test public void marksOfGraceColourTheCourseAndGetATile()

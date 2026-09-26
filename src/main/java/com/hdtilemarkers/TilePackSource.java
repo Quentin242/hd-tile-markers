@@ -59,7 +59,8 @@ final class TilePackSource
                 WorldPoint world = WorldPoint.fromRegion(p.regionId, p.regionX, p.regionY, p.z);
                 for (WorldPoint instance : WorldPoint.toLocalInstance(wv, world))
                 {
-                    LocalPoint local = LocalPoint.fromWorld(wv, instance);
+                    // MarkerSources caches these across floor changes; keep points on every instance floor.
+                    LocalPoint local = LocalPoint.fromWorld(wv, instance.getX(), instance.getY());
                     if (local == null) { continue; }
                     Color color = override || p.color == null ? overrideColor : p.color;
                     Marker m = new Marker("tilepack:" + wv.getId() + ":" + instance, local, instance.getPlane(), 1, 1, color, fill, width,

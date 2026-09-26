@@ -189,7 +189,9 @@ final class MarkerSources
             WorldPoint world = WorldPoint.fromRegion(region, p.regionX, p.regionY, p.z);
             for (WorldPoint instance : WorldPoint.toLocalInstance(wv, world))
             {
-                LocalPoint local = LocalPoint.fromWorld(wv, instance);
+                // Cache every floor: the WorldPoint overload rejects floors other than the current one,
+                // and changing floors within a scene does not necessarily trigger a rebuild.
+                LocalPoint local = LocalPoint.fromWorld(wv, instance.getX(), instance.getY());
                 if (local == null) { continue; }
                 ground.add(layer(Marker.GROUND, new Marker("ground:" + wv.getId() + ":" + instance, local, instance.getPlane(), 1, 1,
                     p.color == null ? defaultColor : p.color, fill, width, p.label, true)));
