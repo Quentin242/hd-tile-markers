@@ -18,6 +18,7 @@ Changes made for HD Tile Markers:
 - `PathMarkerOverlay` is not included. Its display conditions are in `PathMarker.sceneTiles()`, and HD Tile Markers' scene renderer draws the tiles and dots. The minimap overlay is kept.
 - The dot marker is centered on the tile center.
 - Partial/unfound routes no longer force every step into the primary tile list while running. Checkpoint movement validation likewise no longer assumes walking solely because the route was not fully found. HD Tile Markers' extended-distance path uses the same running state and primary/secondary colors.
+- `Pathfinder` makes its route points from scene coordinates instead of the scene's `Tile` objects, which can be null on a walkable route and then threw a `NullPointerException`.
 
 ## RuneLite
 
@@ -43,7 +44,7 @@ HD Tile Markers does not copy RuneLite source files as a whole. It reads Ground 
 - Commit: `bf59bfb9a616897e9ffcd14d0d2b543e4c119b09`
 - License: BSD 2-Clause, copyright (c) 2022 Buchus. Full text in `src/main/resources/META-INF/LICENSE-better-npc-highlight`, included in the JAR.
 
-Files in `src/main/java/com/hdtilemarkers/betternpc/` are adapted from that repository; each carries a header naming its origin. Changes: package names; `BetterNpcHighlightConfig` is used only to read Better NPC Highlight's saved settings (same group and keys), never to write; its setters and the menu-tagging methods that write settings are removed, and it is not bound in HD Tile Markers' injector (so RuneLite never shows it as HD Tile Markers' settings or fills in its defaults); the Slayer plugin is never enabled by HD Tile Markers; `BetterNpcEvents` keeps only the list-maintenance event handling of the plugin class; `BetterNpcView` is the overlay split into selection (`visit`), per-style 2D drawing (`render2d`) and names/respawn timers (`renderExtras`). Draw-beneath, the entity hider, menu highlighting and the debug option are not included (their settings are not read). `BetterNpcSource.java` follows the overlay's colours, alphas and widths per style. Menus, the entity hider, config migration and the minimap overlay stay in Better NPC Highlight itself.
+Files in `src/main/java/com/hdtilemarkers/betternpc/` are adapted from that repository; each carries a header naming its origin. Changes: package names; `BetterNpcHighlightConfig` is used only to read Better NPC Highlight's saved settings (same group and keys), never to write; its setters and the menu-tagging methods that write settings are removed, and it is not bound in HD Tile Markers' injector (so RuneLite never shows it as HD Tile Markers' settings or fills in its defaults); the Slayer plugin is never enabled by HD Tile Markers; `BetterNpcEvents` keeps only the list-maintenance event handling of the plugin class; `BetterNpcView` is the overlay split into selection (`visit`), per-style 2D drawing (`render2d`) and names/respawn timers (`renderExtras`). Draw-beneath, the entity hider, menu highlighting and the debug option are not included (their settings are not read). A rave speed under 20 ms no longer divides by zero, and an NPC without a model counts as invisible instead of throwing. `BetterNpcSource.java` follows the overlay's colours, alphas and widths per style. Menus, the entity hider, config migration and the minimap overlay stay in Better NPC Highlight itself.
 
 ## Tile Packs
 

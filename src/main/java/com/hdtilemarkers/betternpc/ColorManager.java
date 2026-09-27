@@ -2,7 +2,7 @@
  * Adapted from Better NPC Highlight, https://github.com/riktenx/better-npc-highlight,
  * commit bf59bfb9a616897e9ffcd14d0d2b543e4c119b09. BSD 2-Clause License, see
  * META-INF/LICENSE-better-npc-highlight and THIRD_PARTY_NOTICES.md. Changes for HD
- * Tile Markers: package only.
+ * Tile Markers: package, and a rave speed under 20 ms no longer divides by zero.
  */
 package com.hdtilemarkers.betternpc;
 
@@ -166,7 +166,8 @@ public class ColorManager {
 	}
 
 	private Color getRaveColor(int speed) {
-		int ticks = speed / 20;
+		// At least one cycle: a speed under 20 ms gave 0, and % 0 threw.
+		int ticks = Math.max(1, speed / 20);
 		return Color.getHSBColor((client.getGameCycle() % ticks) / ((float) ticks), 1.0f, 1.0f);
 	}
 }

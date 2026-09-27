@@ -2,7 +2,8 @@
  * Adapted from Path Marker by GeChallengeM
  * https://github.com/GeChallengeM/path-marker, commit 495f3594bf697a1b9a5313802f731b2c85a6e37e
  * Copyright (c) 2022, GeChallengeM. BSD 2-Clause License; see META-INF/LICENSE-path-marker
- * and THIRD_PARTY_NOTICES.md. Changes for HD Tile Markers: package and class names only.
+ * and THIRD_PARTY_NOTICES.md. Changes for HD Tile Markers: package and class names, and route points
+ * made from scene coordinates (a scene tile on the route can be null).
  */
 package com.hdtilemarkers.pathmarker;
 
@@ -273,11 +274,11 @@ public class Pathfinder
         }
 
         int checkpointTileNumber = 1;
-        Tile[][][] tiles = player.getWorldView().getScene().getTiles();
         List<WorldPoint> checkpointWPs = new ArrayList<>();
         while (index-- > 0)
         {
-            checkpointWPs.add(tiles[z][bufferX[index]][bufferY[index]].getWorldLocation());
+            // From scene coordinates, not the scene's Tile: a tile on a walkable route can be null
+            checkpointWPs.add(WorldPoint.fromScene(player.getWorldView(), bufferX[index], bufferY[index], z));
             if (checkpointTileNumber == 25)
             {
                 // Pathfinding only supports up to the 25 first checkpoint tiles

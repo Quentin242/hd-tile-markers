@@ -1,11 +1,14 @@
 package com.hdtilemarkers;
 
 import com.hdtilemarkers.pathmarker.PathMarker;
+import com.hdtilemarkers.pathmarker.Pathfinder;
 import java.awt.Color;
+import java.util.Collections;
 import java.util.List;
 import net.runelite.api.Player;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.WorldPoint;
+import org.apache.commons.lang3.tuple.Pair;
 import org.junit.Before;
 import org.junit.Test;
 import static org.junit.Assert.*;
@@ -58,6 +61,32 @@ public class WalkPredictorTest
         assertEquals(new WorldPoint(3211, 3211, 0), tiles.get(0).point);
         assertEquals(new WorldPoint(3215, 3215, 0), tiles.get(4).point);
         assertEquals(new WorldPoint(3215, 3230, 0), tiles.get(19).point);
+    }
+
+    @Test public void aPathfinderFailureLeavesAStraightLine()
+    {
+        Player player = mock(Player.class);
+        when(player.getWorldView()).thenReturn(wv);
+        when(player.getWorldLocation()).thenReturn(new WorldPoint(3210, 3210, 0));
+        Pathfinder pathfinder = mock(Pathfinder.class);
+        when(pathfinder.pathTo(anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt())).thenThrow(new NullPointerException());
+        List<PathMarker.SceneTile> tiles = WalkPredictor.path(player, pathfinder, new WorldPoint(3215, 3230, 0), Color.RED, Color.RED, Color.RED, Color.RED, false, false);
+        assertEquals(20, tiles.size());
+        assertEquals(new WorldPoint(3215, 3230, 0), tiles.get(19).point);
+    }
+
+    @Test public void withoutARouteThePathLeavesPathMarkersLastRouteAlone()
+    {
+        Player player = mock(Player.class);
+        when(player.getWorldView()).thenReturn(wv);
+        when(player.getWorldLocation()).thenReturn(new WorldPoint(3210, 3210, 0));
+        // Nothing reachable: Path Marker's pathfinder answers with its last route's first point (0, 0 after a hop).
+        Pathfinder pathfinder = mock(Pathfinder.class);
+        when(pathfinder.pathTo(anyInt(), anyInt(), anyInt(), anyInt(), anyInt(), anyInt()))
+            .thenReturn(Pair.of(Collections.singletonList(new WorldPoint(0, 0, 0)), false));
+        List<PathMarker.SceneTile> tiles = WalkPredictor.path(player, pathfinder, new WorldPoint(3215, 3230, 0), Color.RED, Color.RED, Color.RED, Color.RED, false, false);
+        assertEquals(20, tiles.size());
+        assertEquals(new WorldPoint(3211, 3211, 0), tiles.get(0).point);
     }
 
     @Test public void distantRunningPathUsesSecondaryColorsAndPrimaryDestination()

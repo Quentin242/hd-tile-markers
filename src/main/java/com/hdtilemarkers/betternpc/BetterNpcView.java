@@ -29,7 +29,8 @@
  * https://github.com/riktenx/better-npc-highlight, commit bf59bfb9a616897e9ffcd14d0d2b543e4c119b09).
  * Changes: no longer an overlay. visit() is the original selection loop, render2d() the original
  * drawing of one style (used for styles HD Tile Markers cannot draw in the scene and as the 2D fallback),
- * renderExtras() the original names and respawn timers. Draw-beneath is not included.
+ * renderExtras() the original names and respawn timers. Draw-beneath is not included. An NPC without a
+ * model counts as invisible instead of throwing.
  */
 package com.hdtilemarkers.betternpc;
 
@@ -622,6 +623,10 @@ public class BetterNpcView
 
 	private static boolean isInvisible(Model model)
 	{
+		if (model == null)
+		{
+			return true;
+		}
 		// If all the values in model.getFaceColors3() are -1 then the model is invisible
 		for (int value : model.getFaceColors3())
 		{

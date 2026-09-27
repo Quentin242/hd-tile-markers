@@ -719,6 +719,79 @@ public class SceneShapeRendererTest
         verify(mesh, times(2)).getFaceIndices1();
     }
 
+    @Test public void identicalObjectsSharingOneModelAreEachDrawnInTheirOwnPlace()
+    {
+        separateCarriers();
+        // The client gives identical objects on flat ground one static model.
+        Model shared = triangle();
+        int[] xs = {1344, 1344 + 3 * 128};
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        renderer.begin(CAMERA, 1, null, 0);
+        for (int x : xs)
+        {
+            assertTrue(renderer.model(ModelTarget.object("object:" + x + ":hull", gameObject(shared, x), shared, 0, 0,
+                Color.RED, Marker.NO_FILL, 2, false, () -> null)));
+        }
+        assertTrue(renderer.end());
+        ArgumentCaptor<RuneLiteObjectController> registered = ArgumentCaptor.forClass(RuneLiteObjectController.class);
+        verify(client, times(2)).registerRuneLiteObject(registered.capture());
+        float[] p = new float[3];
+        for (int x : xs)
+        {
+            // Each hull lies around its own object on the canvas, not around the first one's.
+            CAMERA.project(x, 1344, -100, p);
+            float own = p[0];
+            boolean covered = false;
+            for (RuneLiteObjectController o : registered.getAllValues())
+            {
+                Model m = o.getModel();
+                float min = Float.MAX_VALUE, max = -Float.MAX_VALUE;
+                for (int f = 0; f < m.getFaceCount(); f++)
+                {
+                    if (m.getFaceColors3()[f] == -2) { continue; }
+                    for (int v : new int[]{m.getFaceIndices1()[f], m.getFaceIndices2()[f], m.getFaceIndices3()[f]})
+                    {
+                        CAMERA.project(o.getX() + m.getVerticesX()[v], o.getY() + m.getVerticesZ()[v], o.getZ() + m.getVerticesY()[v], p);
+                        min = Math.min(min, p[0]); max = Math.max(max, p[0]);
+                    }
+                }
+                covered |= min <= own && own <= max;
+            }
+            assertTrue("object at x " + x + " has its own hull", covered);
+        }
+    }
+
+    @Test public void aWallsTwoModelPartsKeepTheirOwnProjections()
+    {
+        Model first = triangle(), second = triangle();
+        java.util.Arrays.fill(second.getVerticesX(), 1000000);
+        WallObject wall = mock(WallObject.class);
+        when(wall.getX()).thenReturn(1344); when(wall.getY()).thenReturn(1344);
+        when(wall.getWorldView()).thenReturn(wv);
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        renderer.begin(CAMERA, 1, null, 0);
+        assertTrue(renderer.model(ModelTarget.object("wall:hull", wall, first, 0, 0, Color.RED, Marker.NO_FILL, 2, false, () -> null)));
+        assertFalse(renderer.model(ModelTarget.object("wall:hull2", wall, second, 0, 0, Color.RED, Marker.NO_FILL, 2, false, () -> null)));
+        assertTrue(renderer.end());
+    }
+
+    @Test public void aCarrierModelStillLoadingIsTriedAgainTheNextFrame()
+    {
+        // The client gives null while it still loads the model (a new or updated cache).
+        when(client.loadModelData(anyInt())).thenReturn(null, seed);
+        SceneShapeRenderer renderer = new SceneShapeRenderer(client, new CarrierModels(client), new RenderTrace());
+        Marker tile = new Marker("t", new LocalPoint(1344, 1344, -1), 0, 1, 1, Color.RED, null, 2, null, false);
+        renderer.begin(CAMERA, 1, null, 0);
+        renderer.tile(tile);
+        assertFalse(renderer.end());
+        // Once in that frame, not for every shape.
+        verify(client, times(1)).loadModelData(anyInt());
+        renderer.begin(CAMERA, 1, null, 0);
+        renderer.tile(tile);
+        assertTrue(renderer.end());
+        assertTrue(renderer.drawn("t"));
+    }
+
     @Test public void offscreenOutlineSkipsTopologyAndFallback()
     {
         Model mesh = triangle();
@@ -768,6 +841,36 @@ public class SceneShapeRendererTest
         when(npc.getLocalLocation()).thenReturn(new LocalPoint(x, 1344, -1));
         when(npc.getWorldView()).thenReturn(wv);
         return npc;
+    }
+
+    /** Every carrier made from here on is a model of its own, so the shapes of each scene object can be told apart. */
+    private void separateCarriers()
+    {
+        when(client.mergeModels(any(ModelData[].class))).thenAnswer(i -> {
+            ModelData merged = mock(ModelData.class), mergedAlpha = mock(ModelData.class);
+            when(merged.cloneVertices()).thenReturn(merged);
+            when(merged.cloneColors()).thenReturn(merged);
+            when(merged.cloneTransparencies(true)).thenReturn(mergedAlpha);
+            for (ModelData d : new ModelData[]{merged, mergedAlpha})
+            {
+                when(d.getFaceIndices1()).thenReturn(new int[1]);
+                when(d.getFaceIndices2()).thenReturn(new int[1]);
+                when(d.getFaceIndices3()).thenReturn(new int[1]);
+                when(d.getVerticesX()).thenReturn(new float[1]);
+            }
+            when(merged.light()).thenAnswer(j -> model(200, 300, false));
+            when(mergedAlpha.light()).thenAnswer(j -> model(200, 300, true));
+            return merged;
+        });
+    }
+
+    private GameObject gameObject(Renderable renderable, int x)
+    {
+        GameObject object = mock(GameObject.class);
+        when(object.getRenderable()).thenReturn(renderable);
+        when(object.getWorldView()).thenReturn(wv);
+        when(object.getX()).thenReturn(x); when(object.getY()).thenReturn(1344);
+        return object;
     }
 
     private Model triangle()

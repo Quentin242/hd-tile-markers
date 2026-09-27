@@ -37,8 +37,8 @@ final class SceneShapeRenderer
     private final Map<Long, Stage> stages = new HashMap<>();
     private final Set<String> appended = new HashSet<>();
     /**
-     * Projections per NPC or object renderable, kept across frames so their arrays are reused.
-     * Styles of one NPC share its projection within a frame; static object models keep theirs,
+     * Projections per NPC or object (an object's second model part chained, see projection), kept across frames so
+     * their arrays are reused. Styles of one NPC share its projection within a frame; static object models keep theirs,
      * silhouette included, while the camera and the object stay where they were.
      */
     private final Map<Object, Projection> projections = new IdentityHashMap<>();
@@ -82,6 +82,7 @@ final class SceneShapeRenderer
      */
     void prewarm(long budgetNanos)
     {
+        carriers.nextFrame();
         long start = System.nanoTime();
         while (spareCarriers.size() < PREWARM && System.nanoTime() - start < budgetNanos)
         {
@@ -121,6 +122,9 @@ final class SceneShapeRenderer
         /** Hidden faces, summed, and the viewport of the projection: all a clickbox or outline depends on besides points. */
         long hiddenSum;
         int viewport;
+        /** The object's model part this is of (null for an NPC); its other part, of walls and decorations, is next. */
+        Renderable part;
+        Projection next;
     }
     private final Silhouette.Scratch silhouetteScratch = new Silhouette.Scratch();
     private final ScreenOutline outline = new ScreenOutline();
@@ -246,6 +250,7 @@ final class SceneShapeRenderer
         playerCut = null;
         playerPending = false;
         unavailable = false;
+        carriers.nextFrame();
         for (Bucket b : buckets.values()) { b.vertices = 0; b.faces = 0; }
         for (Stage s : stages.values()) { s.vertices = 0; s.faces = 0; s.count = 0; }
         // Normals point straight up (model y is down): 117 HD, which uses them because faces are not
@@ -412,10 +417,8 @@ final class SceneShapeRenderer
         if (unavailable || location == null || location.getWorldView() != client.getTopLevelWorldView().getId())
         { return false; }
         int height = t.height(client);
-        Object id = t.npc != null ? t.npc : t.renderable;
-        if (id == null) { return false; }
-        Projection projected = projections.get(id);
-        if (projected == null) { projected = new Projection(); projections.put(id, projected); }
+        if (t.npc == null && t.renderable == null) { return false; }
+        Projection projected = projection(t);
         if (projected.frame != frame && !unchanged(t, projected, location, height))
         {
             Mesh<?> mesh = t.mesh();
@@ -517,6 +520,36 @@ final class SceneShapeRenderer
         if (offscreen()) { return culled(t.key); }
         int level = Terrain.level(client.getTopLevelWorldView(), location.getSceneX(), location.getSceneY(), t.plane());
         return draw(t.key, location, level, height, t.color, asHull ? Marker.NO_FILL : t.fill, t.borderWidth > 0);
+    }
+
+    /**
+     * The projection of a target's model part, shared by its styles: per NPC, or per object and renderable. Not per
+     * renderable alone: the client gives identical objects one static model, and every copy then got the first one's
+     * projection, drawn in its place.
+     */
+    private Projection projection(ModelTarget t)
+    {
+        Object owner = t.npc != null ? t.npc : t.object;
+        Projection first = projections.get(owner), p = first;
+        while (p != null && p.part != t.renderable) { p = p.next; }
+        if (p == null)
+        {
+            p = new Projection();
+            p.part = t.renderable;
+            p.next = first;
+            projections.put(owner, p);
+        }
+        return p;
+    }
+
+    /** The projections of a chain that were used this frame, still chained, or null when none was. */
+    private Projection usedThisFrame(Projection p)
+    {
+        if (p == null) { return null; }
+        Projection next = usedThisFrame(p.next);
+        if (p.frame != frame) { return next; }
+        p.next = next;
+        return p;
     }
 
     /**
@@ -1042,7 +1075,8 @@ final class SceneShapeRenderer
             }
         }
         // Projections of models not drawn this frame are dropped.
-        projections.values().removeIf(p -> p.frame != frame);
+        projections.replaceAll((owner, p) -> usedThisFrame(p));
+        projections.values().removeIf(Objects::isNull);
         // Reclaim vacated tiles before allocating models for newly occupied tiles.
         for (Bucket b : buckets.values())
         {

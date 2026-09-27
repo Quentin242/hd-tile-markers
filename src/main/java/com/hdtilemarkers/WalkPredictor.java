@@ -75,8 +75,13 @@ final class WalkPredictor
         {
             int x = Math.max(0, Math.min(wv.getSizeX() - 1, target.getX() - wv.getBaseX()));
             int y = Math.max(0, Math.min(wv.getSizeY() - 1, target.getY() - wv.getBaseY()));
-            Pair<List<WorldPoint>, Boolean> result = pathfinder.pathTo(x, y, 1, 1, -1, -1);
-            if (result != null && result.getLeft() != null) { waypoints.addAll(result.getLeft()); }
+            Pair<List<WorldPoint>, Boolean> result;
+            // This runs in the tick that collects every mark: a failure in Path Marker's pathfinder leaves this path a
+            // straight line instead of turning every mark 2D.
+            try { result = pathfinder.pathTo(x, y, 1, 1, -1, -1); }
+            catch (RuntimeException ex) { result = null; }
+            // Without a route (false) the pathfinder returns the first point of Path Marker's last route, not of this one.
+            if (result != null && Boolean.TRUE.equals(result.getRight()) && result.getLeft() != null) { waypoints.addAll(result.getLeft()); }
         }
         waypoints.add(target);
         List<PathMarker.SceneTile> tiles = new ArrayList<>();

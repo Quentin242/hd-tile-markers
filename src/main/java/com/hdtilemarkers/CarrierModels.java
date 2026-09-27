@@ -17,8 +17,13 @@ final class CarrierModels
 {
     private final Client client;
     private ModelData seed;
-    /** The seed could not be loaded: not tried again every frame, only after reset(). */
+    /** The seed has no geometry to carry: not tried again, only after reset(). */
     private boolean seedFailed;
+    /**
+     * The seed was tried this frame. The client gives null while it still loads the model (a new or updated cache), so
+     * that is tried again once per frame; kept as a failure until reset(), it left every mark 2D all session.
+     */
+    private boolean triedThisFrame;
 
     @Inject
     CarrierModels(Client client) { this.client = client; }
@@ -29,13 +34,18 @@ final class CarrierModels
      */
     static final int MAX_VERTICES = 6400, MAX_FACES = 3900;
 
+    /** A new frame: a seed still loading last frame is tried again. */
+    void nextFrame() { triedThisFrame = false; }
+
     private boolean seeded()
     {
-        if (seed == null && !seedFailed)
+        if (seed == null && !seedFailed && !triedThisFrame)
         {
-            seed = client.loadModelData(client.getItemDefinition(ItemID.BRONZE_DAGGER).getInventoryModel());
-            seedFailed = seed == null || seed.getVerticesCount() <= 0 || seed.getFaceCount() <= 0;
-            if (seedFailed) { seed = null; }
+            triedThisFrame = true;
+            ModelData loaded = client.loadModelData(client.getItemDefinition(ItemID.BRONZE_DAGGER).getInventoryModel());
+            if (loaded == null) { return false; }
+            seedFailed = loaded.getVerticesCount() <= 0 || loaded.getFaceCount() <= 0;
+            if (!seedFailed) { seed = loaded; }
         }
         return seed != null;
     }
@@ -115,5 +125,5 @@ final class CarrierModels
         return model.getRadius() >= radius ? model : null;
     }
 
-    void reset() { seed = null; seedFailed = false; }
+    void reset() { seed = null; seedFailed = false; triedThisFrame = false; }
 }
