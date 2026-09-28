@@ -23,7 +23,7 @@ Changes made for HD Tile Markers:
 ## RuneLite
 
 - Source: https://github.com/runelite/runelite, tag `runelite-parent-1.12.39`
-- License: BSD 2-Clause, copyright (c) 2016-2017 Adam, (c) 2018 Tomas Slusny, TheLonelyDev, James Swindle, Woox, Cas and SomeoneWithAnInternetConnection, and the RuneLite contributors. Full text in `src/main/resources/META-INF/LICENSE-runelite`, included in the JAR.
+- License: BSD 2-Clause, copyright (c) 2016-2017 Adam, (c) 2016-2018 Seth, (c) 2018 Tomas Slusny, TheLonelyDev, James Swindle, Woox, Cas and SomeoneWithAnInternetConnection, (c) 2019 Abex and Brandon White, (c) 2020 Mitchell, and the RuneLite contributors. Full text in `src/main/resources/META-INF/LICENSE-runelite`, included in the JAR.
 
 HD Tile Markers does not copy RuneLite source files as a whole. It reads Ground Markers, Object Markers and NPC Indicators data through the public configuration API, and adapts these parts; each file names its origin in a header:
 
@@ -42,7 +42,7 @@ HD Tile Markers does not copy RuneLite source files as a whole. It reads Ground 
 - Authors: Buchus (MoreBuchus); maintained by riktenx and SamuelDev
 - Source: https://github.com/riktenx/better-npc-highlight
 - Commit: `bf59bfb9a616897e9ffcd14d0d2b543e4c119b09`
-- License: BSD 2-Clause, copyright (c) 2022 Buchus. Full text in `src/main/resources/META-INF/LICENSE-better-npc-highlight`, included in the JAR.
+- License: BSD 2-Clause, copyright (c) 2022 Buchus, (c) 2023 geheur and (c) 2021 LeikvollE. Full text in `src/main/resources/META-INF/LICENSE-better-npc-highlight`, included in the JAR.
 
 Files in `src/main/java/com/hdtilemarkers/betternpc/` are adapted from that repository; each carries a header naming its origin. Changes: package names; `BetterNpcHighlightConfig` is used only to read Better NPC Highlight's saved settings (same group and keys), never to write; its setters and the menu-tagging methods that write settings are removed, and it is not bound in HD Tile Markers' injector (so RuneLite never shows it as HD Tile Markers' settings or fills in its defaults); the Slayer plugin is never enabled by HD Tile Markers; `BetterNpcEvents` keeps only the list-maintenance event handling of the plugin class; `BetterNpcView` is the overlay split into selection (`visit`), per-style 2D drawing (`render2d`) and names/respawn timers (`renderExtras`). Draw-beneath, the entity hider, menu highlighting and the debug option are not included (their settings are not read). A rave speed under 20 ms no longer divides by zero, and an NPC without a model counts as invisible instead of throwing. `BetterNpcSource.java` follows the overlay's colours, alphas and widths per style. Menus, the entity hider, config migration and the minimap overlay stay in Better NPC Highlight itself.
 
@@ -51,7 +51,7 @@ Files in `src/main/java/com/hdtilemarkers/betternpc/` are adapted from that repo
 - Author: TrevorMDev
 - Source: https://github.com/TrevorMDev/tile-packs
 - Commit: `d02a2e2f3197eb71df8b94e1282749f1a2844e46` (the Plugin Hub version at the time)
-- License: BSD 2-Clause, copyright (c) 2022 TrevorMDev. Full text in `src/main/resources/META-INF/LICENSE-tile-packs`, included in the JAR.
+- License: BSD 2-Clause, copyright (c) 2022-2024 Trevor (TrevorMDev). Full text in `src/main/resources/META-INF/LICENSE-tile-packs`, included in the JAR.
 
 `src/main/resources/com/hdtilemarkers/tilepacks/tilePacks.jsonc` is the pack list of that commit, unchanged. `TilePackSource.java` adapts its pack loading (`TilePackManager`, `PointManager`): read-only, enabled and custom packs from the Tile Packs configuration, markers returned to HD Tile Markers' renderer. Packs added to Tile Packs after that commit are missing until the file is updated; custom packs are always current.
 
@@ -84,7 +84,7 @@ HD Tile Markers contains no code from this plugin. The Tile Indicators options "
 - Authors: rdutta; maintained by LlemonDuck
 - Source: https://github.com/LlemonDuck/the-gauntlet
 - Commit: `bf0246abf6dc04ce5541264c10e663536f9864c2`
-- License: BSD 2-Clause, copyright (c) 2023 rdutta. Full text in `src/main/resources/META-INF/LICENSE-the-gauntlet`, included in the JAR.
+- License: BSD 2-Clause, copyright (c) 2023 rdutta, (c) 2020 Anthony Alves and (c) 2019 ganom. Full text in `src/main/resources/META-INF/LICENSE-the-gauntlet`, included in the JAR.
 
 `GauntletSource.java` adapts the resource and utility object IDs (`MazeModule`, `ResourceGameObject`, `Resource`), the chat message resource tracking (`ResourceManager`) and the display rules and icons of `MazeOverlay`. Read-only: HD Tile Markers reads its settings, never writes them. Its NPC highlights, infobox counters, minimap and timer stay with that plugin.
 
@@ -93,7 +93,7 @@ HD Tile Markers contains no code from this plugin. The Tile Indicators options "
 - Author: Jordan (nightfirecat)
 - Source: https://github.com/nightfirecat/plugin-hub-plugins
 - Commit: `3ece9e0401f5ebac9da2762015449d5e68bb0bfc`
-- License: BSD 2-Clause, copyright (c) 2021 Jordan. Full text in `src/main/resources/META-INF/LICENSE-rogues-den`, included in the JAR.
+- License: BSD 2-Clause, copyright (c) 2018-2019 Shaun Dreclin and (c) 2021 Jordan Atwood. Full text in `src/main/resources/META-INF/LICENSE-rogues-den`, included in the JAR.
 - `RoguesDenSource.java`: the obstacle objects per tile (`Obstacles`), the jewel check and object tracking (`RoguesDenPlugin`) and the clickbox colours (`RoguesDenOverlay`). HD Tile Markers does not reference its classes; its hint tiles and text still come from its own overlay.
 
 ## Star Info

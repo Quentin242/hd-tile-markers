@@ -1,4 +1,28 @@
 /*
+ * Copyright (c) 2018, Tomas Slusny <slusnucky@gmail.com>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright notice, this
+ *    list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright notice,
+ *    this list of conditions and the following disclaimer in the documentation
+ *    and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+/*
  * The Tile Indicators options reuse the option names and descriptions of RuneLite's
  * TileIndicatorsConfig (copyright (c) 2018 Tomas Slusny, BSD 2-Clause; META-INF/LICENSE-runelite); the path
  * options those of Path Marker's PathMarkerConfig (copyright (c) 2022 GeChallengeM, BSD 2-Clause;
@@ -33,7 +57,7 @@ public interface HdTileMarkersConfig extends Config
     String objectSection = "objects";
     @ConfigSection(name = "Active path", description = "Path Marker: the path you are walking", position = 7)
     String activePathSection = "activePath";
-    @ConfigSection(name = "Debug", description = "Diagnostics for testing", position = 99, closedByDefault = true)
+    @ConfigSection(name = "Debug", description = "Diagnostics for testing, in RuneLite's developer mode only", position = 99, closedByDefault = true)
     String debugSection = "debug";
 
     @ConfigSection(name = "Hover path", description = "Path Marker: the path to the hovered tile", position = 8, closedByDefault = true)
@@ -41,7 +65,7 @@ public interface HdTileMarkersConfig extends Config
 
     // General
 
-    @ConfigItem(keyName = "debug", name = "Debug info", description = "Show the renderer status line (scene or 2D fallback, render trace, source counts). The trace counts every object the client draws, so leave this off unless you are testing", position = 0, section = debugSection)
+    @ConfigItem(keyName = "debug", name = "Debug info", description = "Developer mode only: show the renderer status line (scene or 2D fallback, render trace, source counts) and log frame times. The trace counts every object the client draws, so leave this off unless you are testing", position = 0, section = debugSection)
     default boolean debug() { return false; }
 
     @Range(min = 8, max = 200)

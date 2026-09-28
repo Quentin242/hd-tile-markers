@@ -9,7 +9,6 @@ import java.util.Collections;
 import java.util.List;
 import net.runelite.api.Client;
 import net.runelite.api.NPC;
-import net.runelite.client.config.ConfigManager;
 import net.runelite.client.game.SpriteManager;
 import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 import org.junit.Before;
@@ -25,10 +24,8 @@ public class IndicatorOverlayTest
     @Before public void setup()
     {
         plugin = mock(HdTileMarkersPlugin.class);
-        ConfigManager configs = mock(ConfigManager.class);
-        when(configs.getConfig(HdTileMarkersConfig.class)).thenReturn(mock(HdTileMarkersConfig.class));
         outlines = mock(ModelOutlineRenderer.class);
-        overlay = new IndicatorOverlay(mock(Client.class), plugin, configs, outlines, mock(SpriteManager.class));
+        overlay = new IndicatorOverlay(mock(Client.class), plugin, outlines, mock(SpriteManager.class));
         when(plugin.sceneActive()).thenReturn(true);
     }
 

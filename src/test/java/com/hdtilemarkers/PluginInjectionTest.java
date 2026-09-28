@@ -62,6 +62,7 @@ public class PluginInjectionTest
             binder.bind(MouseManager.class).toInstance(mouse);
             binder.bind(net.runelite.client.game.SpriteManager.class).toInstance(mock(net.runelite.client.game.SpriteManager.class));
             binder.bind(Gson.class).toInstance(new Gson());
+            binder.bind(boolean.class).annotatedWith(com.google.inject.name.Names.named("developerMode")).toInstance(false);
         });
         HdTileMarkersPlugin plugin = new HdTileMarkersPlugin();
         // As PluginManager does: bind the instance and install the plugin as a module.

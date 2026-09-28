@@ -11,7 +11,6 @@ import javax.inject.Inject;
 import net.runelite.api.Client;
 import net.runelite.api.Perspective;
 import net.runelite.api.Point;
-import net.runelite.client.config.ConfigManager;
 import net.runelite.api.NPC;
 import net.runelite.client.ui.overlay.outline.ModelOutlineRenderer;
 import net.runelite.client.ui.overlay.*;
@@ -24,18 +23,16 @@ final class IndicatorOverlay extends Overlay
 {
     private final Client client;
     private final HdTileMarkersPlugin plugin;
-    private final HdTileMarkersConfig config;
     private final ModelOutlineRenderer outlines;
 
     private volatile java.awt.image.BufferedImage directionArrow;
 
-    @Inject IndicatorOverlay(Client client, HdTileMarkersPlugin plugin, ConfigManager manager, ModelOutlineRenderer outlines,
+    @Inject IndicatorOverlay(Client client, HdTileMarkersPlugin plugin, ModelOutlineRenderer outlines,
         net.runelite.client.game.SpriteManager sprites)
     {
         this.client = client; this.plugin = plugin; this.outlines = outlines;
         // Stealing Artefacts' patrol facing arrow sprite.
         sprites.getSpriteAsync(net.runelite.api.gameval.SpriteID.Arrow.YELLOW_UP, 0, sprite -> directionArrow = sprite);
-        config = manager.getConfig(HdTileMarkersConfig.class);
         setLayer(OverlayLayer.ABOVE_SCENE);
         setPosition(OverlayPosition.DYNAMIC);
         setPriority(PRIORITY_LOW);
@@ -53,7 +50,7 @@ final class IndicatorOverlay extends Overlay
         Graphics2D g = (Graphics2D) graphics.create();
         try
         {
-            if (config.debug())
+            if (plugin.debug())
             {
                 String status = plugin.rendererStatus();
                 int x = client.getViewportXOffset() + 12, y = client.getViewportYOffset() + 24;

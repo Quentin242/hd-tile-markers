@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Debug info only works in RuneLite's developer mode, as the Plugin Hub asks of debug settings, and its frame-time lines are logged at debug level.
+- LICENSE lists the copyright holders of the adapted code, and each adapted file carries its original copyright header again. Development notes moved from the guide to CONTRIBUTING.md.
 - Identical objects (Pyramid Plunder urns, Gauntlet resources, several marked objects of one kind) share one model in the client, and each got the first one's hull, clickbox or outline, drawn in that one's place, while showing none of its own. Each object now has its own.
 - A walked route crossing a scene tile the client holds as missing threw in Path Marker's pathfinder, which turned every mark 2D until the next loading screen (Path Marker itself logs the same error). Route points are now made from scene coordinates, and a failure in the pathfinder leaves the predicted path a straight line.
 - The predicted path no longer heads for the first point of Path Marker's previous route (after a hop, the corner of the map) when nothing near the clicked tile can be reached; it continues in a straight line.

@@ -6,6 +6,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import javax.inject.Inject;
+import javax.inject.Named;
 import net.runelite.api.*;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.api.coords.WorldPoint;
@@ -49,6 +50,7 @@ public class HdTileMarkersPlugin extends Plugin
     @Inject private ClientThread clientThread;
     @Inject private EventBus eventBus;
     @Inject private HdTileMarkersConfig config;
+    @Inject @Named("developerMode") private boolean developerMode;
     @Inject private MarkerSources sources;
     @Inject private TilePackSource tilePacks;
     @Inject private ObjectMarkerSource objectMarkers;
@@ -202,7 +204,7 @@ public class HdTileMarkersPlugin extends Plugin
             }
         }
         overlays.add(overlay);
-        tracing(config.debug());
+        tracing(debug());
         pathMarker.startUp();
         eventBus.register(pathMarker);
         eventBus.register(betterNpcEvents);
@@ -277,7 +279,7 @@ public class HdTileMarkersPlugin extends Plugin
     {
         long start = System.nanoTime();
         try { collectTick(); }
-        finally { if (config.debug()) { times.add("tick", System.nanoTime() - start); } }
+        finally { if (debug()) { times.add("tick", System.nanoTime() - start); } }
     }
 
     /** Whether the next rebuild also scans the scene for the sources that follow spawn events (after starting). */
@@ -288,7 +290,7 @@ public class HdTileMarkersPlugin extends Plugin
     {
         WorldView top = client.getTopLevelWorldView();
         long[] at = {System.nanoTime()};
-        StringBuilder parts = config.debug() ? new StringBuilder() : null;
+        StringBuilder parts = debug() ? new StringBuilder() : null;
         java.util.function.Consumer<String> done = part ->
         {
             long now = System.nanoTime();
@@ -312,7 +314,7 @@ public class HdTileMarkersPlugin extends Plugin
         }
         dirty = false;
         rebuilds++;
-        if (parts != null) { log.info("HD Tile Markers rebuild ({}), ms: {}", lastRebuild, parts); }
+        if (parts != null) { log.debug("HD Tile Markers rebuild ({}), ms: {}", lastRebuild, parts); }
     }
 
     private void collectTick()
@@ -469,7 +471,7 @@ public class HdTileMarkersPlugin extends Plugin
         try { renderScene(); }
         finally
         {
-            if (config.debug())
+            if (debug())
             {
                 times.add("scene", System.nanoTime() - start);
                 times.add("outlines", renderer.outlineNanos());
@@ -477,7 +479,7 @@ public class HdTileMarkersPlugin extends Plugin
                 times.add("new models", renderer.newModelNanos());
                 times.add("player cut", renderer.playerCutNanos());
                 String report = times.frame(markers.size() + " tiles, " + modelTargets.size() + " models" + identifiedStatus() + renderer.leftOut());
-                if (report != null) { log.info(report); renderer.resetLeftOut(); }
+                if (report != null) { log.debug(report); renderer.resetLeftOut(); }
             }
         }
     }
@@ -494,8 +496,11 @@ public class HdTileMarkersPlugin extends Plugin
         return out.toString();
     }
 
+    /** Whether debug info is shown: only in RuneLite's developer mode, like the client's own diagnostics. */
+    boolean debug() { return developerMode && config.debug(); }
+
     /** Diagnostics: a part of the frame, while debug info is shown. */
-    void time(String part, long nanos) { if (config.debug()) { times.add(part, nanos); } }
+    void time(String part, long nanos) { if (debug()) { times.add(part, nanos); } }
 
     private void renderScene()
     {
@@ -889,7 +894,7 @@ public class HdTileMarkersPlugin extends Plugin
 
     @Subscribe public void onConfigChanged(ConfigChanged e)
     {
-        if (e.getGroup().equals(HdTileMarkersConfig.GROUP) && "debug".equals(e.getKey())) { tracing(running && config.debug()); return; }
+        if (e.getGroup().equals(HdTileMarkersConfig.GROUP) && "debug".equals(e.getKey())) { tracing(running && debug()); return; }
         if ("hd".equals(e.getGroup()) && "enableShadowTransparency".equals(e.getKey())) { warnedShadowTransparency = false; return; }
         if (QUEST_HELPER_GROUP.equals(e.getGroup()) && e.getKey().startsWith("highlightStyle")) { warnedQuestHelper = false; return; }
         String group = e.getGroup();

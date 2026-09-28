@@ -64,16 +64,4 @@ eventBus.post(new PluginMessage("hd-tile-markers", "tiles", data));
 
 Marks stay until their owner replaces or clears them, at most 1,000 per owner. They are also cleared on logout, world hop, connection loss, profile change and HD Tile Markers shutdown. Send `clear` in your plugin's `shutDown` and republish marks after session changes.
 
-## Development
-
-Java 11 and the Gradle wrapper:
-
-```sh
-./gradlew test jar
-./gradlew run
-```
-
-`test` uses synthetic data and mocks and does not launch RuneLite. `run` starts a separate development client for manual testing. For Jagex accounts, use RuneLite's [development login instructions](https://github.com/runelite/runelite/wiki/Using-Jagex-Accounts). The build defaults to the latest release; `-PruneliteVersion=1.12.39` reproduces the initial local build.
-
-
 Source: [BSD-2-Clause](../LICENSE). Adapted code and its licenses: [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
