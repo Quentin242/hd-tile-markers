@@ -44,6 +44,7 @@ import net.runelite.api.gameval.ItemID;
 import net.runelite.client.config.ConfigManager;
 import net.runelite.client.eventbus.Subscribe;
 import net.runelite.client.game.AgilityShortcut;
+import net.runelite.client.plugins.PluginManager;
 import net.runelite.client.plugins.agility.AgilityConfig;
 import net.runelite.client.plugins.agility.AgilityPlugin;
 import net.runelite.client.util.ColorUtil;
@@ -61,7 +62,7 @@ final class AgilitySource
     private static final Color TILE_FILL = new Color(0, 0, 0, 50);
 
     private final Client client;
-    private final AgilityPlugin plugin;
+    private final PluginManager plugins;
     private final AgilityConfig config;
     private final HdTileMarkersConfig hdConfig;
     /** The matched shortcut per object; it does not change while the object exists. */
@@ -70,9 +71,9 @@ final class AgilitySource
     private Tile stickTile;
 
     @Inject
-    AgilitySource(Client client, AgilityPlugin plugin, ConfigManager configs, HdTileMarkersConfig hdConfig)
+    AgilitySource(Client client, PluginManager plugins, ConfigManager configs, HdTileMarkersConfig hdConfig)
     {
-        this.client = client; this.plugin = plugin; this.hdConfig = hdConfig;
+        this.client = client; this.plugins = plugins; this.hdConfig = hdConfig;
         // Read from ConfigManager, not bound in HD Tile Markers' injector (see BetterNpcView.readConfig).
         config = configs.getConfig(AgilityConfig.class);
     }
@@ -87,7 +88,8 @@ final class AgilitySource
     {
         CameraFocusableEntity focus = client.getCameraFocusEntity();
         WorldView wv = client.getTopLevelWorldView();
-        if (focus == null || wv == null) { return; }
+        AgilityPlugin plugin = plugin();
+        if (focus == null || wv == null || plugin == null) { return; }
         LocalPoint player = focus.getCameraFocus();
         int plane = wv.getPlane();
         // Extended: as far as marked objects are drawn; the plugin's 2350 cuts obstacles off at about 18 tiles.
@@ -150,6 +152,19 @@ final class AgilitySource
                 tiles.add(m);
             }
         }
+    }
+
+    /**
+     * The plugin's instance, from the plugin list: since RuneLite 1.13 only plugins that expose services can be a
+     * {@code @PluginDependency}, and this one does not.
+     */
+    private AgilityPlugin plugin()
+    {
+        for (net.runelite.client.plugins.Plugin p : plugins.getPlugins())
+        {
+            if (p instanceof AgilityPlugin) { return (AgilityPlugin) p; }
+        }
+        return null;
     }
 
     /** highlightTile: the tile of a ground item, near the player. */

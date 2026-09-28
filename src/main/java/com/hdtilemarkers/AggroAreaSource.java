@@ -45,6 +45,7 @@ import net.runelite.api.Player;
 import net.runelite.api.WorldView;
 import net.runelite.api.coords.LocalPoint;
 import net.runelite.client.config.ConfigManager;
+import net.runelite.client.plugins.PluginManager;
 import net.runelite.client.plugins.npcunaggroarea.NpcAggroAreaConfig;
 import net.runelite.client.plugins.npcunaggroarea.NpcAggroAreaPlugin;
 
@@ -62,14 +63,14 @@ final class AggroAreaSource
     private static final int WIDTH = 1;
 
     private final Client client;
-    private final NpcAggroAreaPlugin plugin;
+    private final PluginManager plugins;
     private final NpcAggroAreaConfig config;
     private final HdTileMarkersConfig hdConfig;
 
     @Inject
-    AggroAreaSource(Client client, NpcAggroAreaPlugin plugin, ConfigManager configs, HdTileMarkersConfig hdConfig)
+    AggroAreaSource(Client client, PluginManager plugins, ConfigManager configs, HdTileMarkersConfig hdConfig)
     {
-        this.client = client; this.plugin = plugin; this.hdConfig = hdConfig;
+        this.client = client; this.plugins = plugins; this.hdConfig = hdConfig;
         // Read from ConfigManager, not bound in HD Tile Markers' injector (see BetterNpcView.readConfig).
         config = configs.getConfig(NpcAggroAreaConfig.class);
     }
@@ -78,7 +79,8 @@ final class AggroAreaSource
     {
         Player player = client.getLocalPlayer();
         WorldView wv = client.getTopLevelWorldView();
-        if (player == null || wv == null || !plugin.isActive() || plugin.getSafeCenters()[1] == null) { return; }
+        NpcAggroAreaPlugin plugin = plugin();
+        if (player == null || wv == null || plugin == null || !plugin.isActive() || plugin.getSafeCenters()[1] == null) { return; }
         if (player.getHealthScale() == -1 && config.hideIfOutOfCombat()) { return; }
         GeneralPath[] all = plugin.getLinesToDisplay();
         int plane = wv.getPlane();
@@ -92,6 +94,19 @@ final class AggroAreaSource
         // Extended: as far as the draw distance instead of the overlay's 20 tiles.
         int reach = MarkerSources.pluginRange(hdConfig, MAX_LOCAL_DRAW_LENGTH);
         lines(lines, player.getLocalLocation(), plane, color, wv.getId(), reach, out);
+    }
+
+    /**
+     * The plugin's instance, from the plugin list: since RuneLite 1.13 only plugins that expose services can be a
+     * {@code @PluginDependency}, and this one does not.
+     */
+    private NpcAggroAreaPlugin plugin()
+    {
+        for (net.runelite.client.plugins.Plugin p : plugins.getPlugins())
+        {
+            if (p instanceof NpcAggroAreaPlugin) { return (NpcAggroAreaPlugin) p; }
+        }
+        return null;
     }
 
     /** Splits the path into short polylines of connected tile edges near the player. */

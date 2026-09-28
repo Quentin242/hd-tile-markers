@@ -38,7 +38,9 @@ public class AgilitySourceTest
         when(plugin.getMarksOfGrace()).thenReturn(marks);
         when(plugin.getNpcs()).thenReturn(Collections.emptySet());
         hdConfig = mock(HdTileMarkersConfig.class, CALLS_REAL_METHODS);
-        source = new AgilitySource(client, plugin, configs, hdConfig);
+        net.runelite.client.plugins.PluginManager plugins = mock(net.runelite.client.plugins.PluginManager.class);
+        when(plugins.getPlugins()).thenReturn(Collections.singletonList(plugin));
+        source = new AgilitySource(client, plugins, configs, hdConfig);
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

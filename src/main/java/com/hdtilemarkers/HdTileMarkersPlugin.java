@@ -29,14 +29,8 @@ import org.slf4j.LoggerFactory;
 
 @PluginDescriptor(name = "HD Tile Markers", description = "Sharp tile, NPC, object and path markers drawn in the game world, also in stretched mode",
     tags = {"tiles", "markers", "npcs", "objects", "path", "stretched"})
-@PluginDependency(GroundMarkerPlugin.class)
-@PluginDependency(ObjectIndicatorsPlugin.class)
-@PluginDependency(NpcIndicatorsPlugin.class)
-@PluginDependency(net.runelite.client.plugins.npcunaggroarea.NpcAggroAreaPlugin.class)
-@PluginDependency(net.runelite.client.plugins.agility.AgilityPlugin.class)
-// The Agility plugin injects the XP Tracker's service: RuneLite does not load a dependency's own dependencies.
-@PluginDependency(net.runelite.client.plugins.xptracker.XpTrackerPlugin.class)
-// Better NPC Highlight's task highlighting reads the Slayer plugin's task.
+// Better NPC Highlight's task highlighting reads the Slayer plugin's task (SlayerPluginService). Since RuneLite 1.13 a
+// dependency must expose services; other plugins are found in the plugin list (enabled, AgilitySource, AggroAreaSource).
 @PluginDependency(net.runelite.client.plugins.slayer.SlayerPlugin.class)
 public class HdTileMarkersPlugin extends Plugin
 {
@@ -77,9 +71,6 @@ public class HdTileMarkersPlugin extends Plugin
     @Inject private OverlayManager overlays;
     @Inject private PluginManager plugins;
     @Inject private ConfigManager configManager;
-    @Inject private GroundMarkerPlugin groundPlugin;
-    @Inject private ObjectIndicatorsPlugin objectPlugin;
-    @Inject private NpcIndicatorsPlugin npcPlugin;
     private GroundMarkerOverlay originalGround;
     private Overlay originalObjects;
     /** Plugin Hub plugins' scene overlays, held back while HD Tile Markers draws their marks (matched by class name). */
@@ -326,9 +317,9 @@ public class HdTileMarkersPlugin extends Plugin
             if (dirty) { rebuild(); }
             long rebuilt = System.nanoTime();
             time("tick rebuild", rebuilt - start);
-            sources.groundEnabled = plugins.isPluginEnabled(groundPlugin);
-            sources.objectsEnabled = plugins.isPluginEnabled(objectPlugin);
-            sources.npcsEnabled = plugins.isPluginEnabled(npcPlugin);
+            sources.groundEnabled = enabled(GroundMarkerPlugin.class);
+            sources.objectsEnabled = enabled(ObjectIndicatorsPlugin.class);
+            sources.npcsEnabled = enabled(NpcIndicatorsPlugin.class);
             // Replace the original overlays unless the scene route has actually failed. Without GPU
             // HD Tile Markers draws 2D itself; merely not having drawn a frame yet (start-up) is not a failure.
             boolean drawing = !client.isGpu() || sceneActive();
@@ -724,14 +715,14 @@ public class HdTileMarkersPlugin extends Plugin
     private void restoreObjects()
     {
         if (originalObjects == null) { return; }
-        if (plugins.isPluginEnabled(objectPlugin)) { overlays.add(originalObjects); }
+        if (enabled(ObjectIndicatorsPlugin.class)) { overlays.add(originalObjects); }
         originalObjects = null;
     }
 
     private void restoreGround()
     {
         if (originalGround == null) { return; }
-        if (plugins.isPluginEnabled(groundPlugin)) { overlays.add(originalGround); }
+        if (enabled(GroundMarkerPlugin.class)) { overlays.add(originalGround); }
         originalGround = null;
     }
 
@@ -852,6 +843,16 @@ public class HdTileMarkersPlugin extends Plugin
      * Tile Markers cannot draw it sharp; its convex hull and click box styles it can. HD Tile Markers never changes
      * another plugin's settings: it only tells the player, once, in the chat box (local only), how to turn this off.
      */
+    /** Whether a core plugin is switched on, found in the plugin list. */
+    private boolean enabled(Class<? extends Plugin> type)
+    {
+        for (Plugin p : plugins.getPlugins())
+        {
+            if (type.isInstance(p)) { return plugins.isPluginEnabled(p); }
+        }
+        return false;
+    }
+
     private void warnQuestHelperOutlines()
     {
         if (warnedQuestHelper || config.ignoreQuestHelperWarning() || !sceneActive()) { return; }
